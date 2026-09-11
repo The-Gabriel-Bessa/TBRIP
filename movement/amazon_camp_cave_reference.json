@@ -1087,227 +1087,6 @@
   },
   "observations": [
     {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_134839751_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -1,
-        -2,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 615,
-      "added_tiles": 0,
-      "confirmed_tiles": 615,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_134847819_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -2,
-        -3,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 639,
-      "added_tiles": 0,
-      "confirmed_tiles": 639,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_134855873_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -3,
-        -4,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 663,
-      "added_tiles": 0,
-      "confirmed_tiles": 663,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_134903957_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -3,
-        -6,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 674,
-      "added_tiles": 0,
-      "confirmed_tiles": 674,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135415739_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        0,
-        0,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 566,
-      "added_tiles": 0,
-      "confirmed_tiles": 566,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135423761_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        1,
-        -1,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 592,
-      "added_tiles": 0,
-      "confirmed_tiles": 592,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135431831_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        0,
-        -2,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 616,
-      "added_tiles": 0,
-      "confirmed_tiles": 616,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135439336_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -1,
-        -2,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 615,
-      "added_tiles": 0,
-      "confirmed_tiles": 615,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135447321_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -2,
-        -3,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 639,
-      "added_tiles": 0,
-      "confirmed_tiles": 639,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135519938_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -2,
-        -3,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 639,
-      "added_tiles": 0,
-      "confirmed_tiles": 639,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135527430_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -2,
-        -2,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 614,
-      "added_tiles": 0,
-      "confirmed_tiles": 614,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135534942_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -1,
-        -2,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 615,
-      "added_tiles": 0,
-      "confirmed_tiles": 615,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135542439_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        0,
-        -2,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 616,
-      "added_tiles": 0,
-      "confirmed_tiles": 616,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135550072_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        1,
-        -2,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 617,
-      "added_tiles": 0,
-      "confirmed_tiles": 617,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135617916_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        0,
-        -3,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 640,
-      "added_tiles": 1,
-      "confirmed_tiles": 640,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135626068_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -2,
-        -3,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 639,
-      "added_tiles": 0,
-      "confirmed_tiles": 639,
-      "conflicts": 0
-    },
-    {
-      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135634231_Rafaelkrosa_Hotkey_6.png",
-      "coordinate": [
-        -3,
-        -4,
-        0
-      ],
-      "agreement": 1.0,
-      "matching_tiles": 663,
-      "added_tiles": 0,
-      "confirmed_tiles": 663,
-      "conflicts": 0
-    },
-    {
       "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\2026-09-11_135642302_Rafaelkrosa_Hotkey_6.png",
       "coordinate": [
         -3,
@@ -3684,6 +3463,227 @@
       "matching_tiles": 586,
       "added_tiles": 0,
       "confirmed_tiles": 586,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158401302_000002.png",
+      "coordinate": [
+        0,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 562,
+      "added_tiles": 0,
+      "confirmed_tiles": 562,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158412349_000196.png",
+      "coordinate": [
+        1,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 563,
+      "added_tiles": 0,
+      "confirmed_tiles": 563,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158414441_000259.png",
+      "coordinate": [
+        2,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 565,
+      "added_tiles": 0,
+      "confirmed_tiles": 565,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158416540_000322.png",
+      "coordinate": [
+        3,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 565,
+      "added_tiles": 0,
+      "confirmed_tiles": 565,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158427495_000640.png",
+      "coordinate": [
+        3,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 565,
+      "added_tiles": 0,
+      "confirmed_tiles": 565,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158429272_000704.png",
+      "coordinate": [
+        4,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 565,
+      "added_tiles": 0,
+      "confirmed_tiles": 565,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158431021_000756.png",
+      "coordinate": [
+        5,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 554,
+      "added_tiles": 0,
+      "confirmed_tiles": 554,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158438234_000962.png",
+      "coordinate": [
+        5,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 554,
+      "added_tiles": 0,
+      "confirmed_tiles": 554,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158445471_001180.png",
+      "coordinate": [
+        5,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 554,
+      "added_tiles": 0,
+      "confirmed_tiles": 554,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158447239_001243.png",
+      "coordinate": [
+        4,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 565,
+      "added_tiles": 0,
+      "confirmed_tiles": 565,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158454498_001450.png",
+      "coordinate": [
+        4,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 565,
+      "added_tiles": 0,
+      "confirmed_tiles": 565,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158461755_001668.png",
+      "coordinate": [
+        4,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 565,
+      "added_tiles": 0,
+      "confirmed_tiles": 565,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158463508_001731.png",
+      "coordinate": [
+        4,
+        -1,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 591,
+      "added_tiles": 0,
+      "confirmed_tiles": 591,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158626540_000002.png",
+      "coordinate": [
+        0,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 562,
+      "added_tiles": 0,
+      "confirmed_tiles": 562,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158629661_000096.png",
+      "coordinate": [
+        1,
+        0,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 563,
+      "added_tiles": 0,
+      "confirmed_tiles": 563,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158631365_000147.png",
+      "coordinate": [
+        1,
+        -1,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 588,
+      "added_tiles": 0,
+      "confirmed_tiles": 588,
+      "conflicts": 0
+    },
+    {
+      "image": "C:\\Users\\bessa\\Documents\\YiffyRip\\TibiaRIP\\runtime\\captures\\obs_1789158633127_000200.png",
+      "coordinate": [
+        1,
+        -2,
+        0
+      ],
+      "agreement": 1.0,
+      "matching_tiles": 614,
+      "added_tiles": 0,
+      "confirmed_tiles": 614,
       "conflicts": 0
     }
   ]
