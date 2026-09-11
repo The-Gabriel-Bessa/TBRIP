@@ -189,14 +189,14 @@ def execute_sequence(
                 planned_position = tuple(planned["expected"])
 
             focus_window(hwnd)
-            time.sleep(0.25)
+            time.sleep(0.15)
             sent_plans = []
             interrupted_by_audio = False
             for planned in plans:
                 press_movement_key(hwnd, planned["key"])
                 sent_plans.append(planned)
                 command_index += 1
-                time.sleep(0.4)
+                time.sleep(0.2)
                 if interrupt_check is not None and interrupt_check():
                     interrupted_by_audio = True
                     break
