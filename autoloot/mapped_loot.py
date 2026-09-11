@@ -72,6 +72,7 @@ def perform_mapped_autoloot(
     corpse_detection: dict,
     reference_path: Path,
     capture_session: CaptureSession | None = None,
+    heal_below: float | None = None,
 ) -> dict:
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     analysis = analyze_world(current_screenshot, verify_name=False)
@@ -111,6 +112,7 @@ def perform_mapped_autoloot(
             reference_path,
             allow_blocked=False,
             capture_session=capture_session,
+            heal_below=heal_below,
         )
         if exit_code != 0:
             results.append({"corpse": list(corpse), "status": "movement_aborted", "plan": plan, "run": run})

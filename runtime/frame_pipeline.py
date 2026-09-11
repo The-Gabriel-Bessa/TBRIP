@@ -49,6 +49,9 @@ class FramePipeline:
             "enemies": [enemy["name"] for enemy in battle["matched_enemies"]],
             "health_percent": status["health_percent"],
             "mana_percent": status["mana_percent"],
+            "health": status.get("health"),
+            "mana": status.get("mana"),
+            "status_mode": status.get("mode"),
             "analysis_seconds": round(time.perf_counter() - started, 3),
             "readers": ["battle", "status", "world"],
         }

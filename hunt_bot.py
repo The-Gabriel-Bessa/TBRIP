@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import ctypes
 import json
+import math
 import subprocess
 import sys
 import time
@@ -12,7 +12,7 @@ from collections import Counter, deque
 from datetime import datetime
 from pathlib import Path
 
-from capture_internal import find_window, press_key
+from capture_internal import find_window, focus_window, press_key
 from movement.pathfinding import initial_departure, patrol_route, return_to_checkpoint
 from movement.safe_walk import capture_state, execute_sequence
 from movement.world_model import localize_in_reference, merge_observation
@@ -22,8 +22,9 @@ from runtime.frame_pipeline import FramePipeline
 from runtime.frame_source import CAPTURE_MODES, VCAM_DEVICE, CaptureSession
 
 
-user32 = ctypes.windll.user32
 VK_O = 0x4F
+VK_F1 = 0x70
+VK_F2 = 0x71
 
 
 def latest_state(run: dict) -> dict:
@@ -32,20 +33,50 @@ def latest_state(run: dict) -> dict:
     return run["initial"]
 
 
+def terminate_process_tree(process: subprocess.Popen, timeout: float = 5.0) -> None:
+    """Stop combat and its FFmpeg child together on Windows."""
+    if process.poll() is not None:
+        return
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=False,
+        )
+        process.wait(timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        process.kill()
+        process.wait(timeout=timeout)
+
+
 def run_combat_process(
     project: Path,
     autoloot: bool,
     capture_source: str,
     obs_device: str,
     ffmpeg: str | None,
+    max_seconds: float,
+    heal_below: float,
+    emergency_hp: int,
+    mana_below: float,
+    retreat_enemies: int,
+    initial_enemies: list[str],
 ) -> dict:
     command = [
         sys.executable,
         str(project / "combat_until_clear.py"),
         "--max-seconds",
-        "60",
+        str(max_seconds),
         "--heal-below",
-        "70",
+        str(heal_below),
+        "--emergency-hp",
+        str(emergency_hp),
+        "--mana-below",
+        str(mana_below),
+        "--retreat-enemies",
+        str(retreat_enemies),
         "--capture-source",
         capture_source,
         "--obs-device",
@@ -53,6 +84,8 @@ def run_combat_process(
     ]
     if ffmpeg:
         command.extend(["--ffmpeg", ffmpeg])
+    for enemy in initial_enemies:
+        command.extend(["--initial-enemy", enemy])
     if not autoloot:
         command.append("--no-autoloot")
     process = subprocess.Popen(
@@ -64,9 +97,21 @@ def run_combat_process(
         encoding="utf-8",
         errors="replace",
     )
+    output = ""
+    timed_out = False
+    try:
+        try:
+            output, _stderr = process.communicate(timeout=max_seconds + 15.0)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            terminate_process_tree(process)
+            output, _stderr = process.communicate(timeout=3.0)
+    finally:
+        if process.poll() is None:
+            terminate_process_tree(process)
+
     events = []
-    assert process.stdout is not None
-    for line in process.stdout:
+    for line in output.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -75,7 +120,9 @@ def run_combat_process(
             events.append(json.loads(line))
         except json.JSONDecodeError:
             events.append({"event": "raw_output", "text": line})
-    exit_code = process.wait()
+    exit_code = 124 if timed_out else process.returncode
+    if timed_out:
+        events.append({"event": "combat_watchdog_timeout", "max_seconds": max_seconds})
     return {"exit_code": exit_code, "events": events}
 
 
@@ -89,12 +136,32 @@ def main() -> int:
     parser.add_argument("--max-moves", type=int, default=30)
     parser.add_argument("--segment-steps", type=int, default=15)
     parser.add_argument("--verify-every", type=int, default=1)
-    parser.add_argument("--heal-below", type=float, default=70.0)
+    parser.add_argument("--heal-below", type=float, default=90.0)
+    parser.add_argument("--emergency-hp", type=int, default=300)
+    parser.add_argument("--mana-below", type=float, default=10.0)
+    parser.add_argument("--retreat-enemies", type=int, default=4)
+    parser.add_argument("--combat-max-seconds", type=float, default=60.0)
     parser.add_argument("--autoloot", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--capture-source", choices=CAPTURE_MODES, default="auto")
     parser.add_argument("--obs-device", default=VCAM_DEVICE)
     parser.add_argument("--ffmpeg")
     args = parser.parse_args()
+    if args.max_moves < 0:
+        parser.error("--max-moves nao pode ser negativo")
+    if args.segment_steps < 1:
+        parser.error("--segment-steps deve ser pelo menos 1")
+    if args.verify_every < 1:
+        parser.error("--verify-every deve ser pelo menos 1")
+    if not math.isfinite(args.heal_below) or not 0 <= args.heal_below <= 100:
+        parser.error("--heal-below deve estar entre 0 e 100")
+    if args.emergency_hp < 0:
+        parser.error("--emergency-hp nao pode ser negativo")
+    if not math.isfinite(args.mana_below) or not 0 <= args.mana_below <= 100:
+        parser.error("--mana-below deve estar entre 0 e 100")
+    if args.retreat_enemies < 1:
+        parser.error("--retreat-enemies deve ser pelo menos 1")
+    if not math.isfinite(args.combat_max_seconds) or args.combat_max_seconds <= 0:
+        parser.error("--combat-max-seconds deve ser um numero positivo")
 
     project = Path(__file__).resolve().parent
     movement_dir = project / "movement"
@@ -103,7 +170,7 @@ def main() -> int:
     output_folder = project / "runtime" / "captures"
     run_path = project / "runs" / f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_hunt.json"
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
-    coordinator = ActionCoordinator(args.heal_below)
+    coordinator = ActionCoordinator(args.heal_below, args.emergency_hp, args.mana_below)
     hwnd, title = find_window("Tibia -")
     capture_session = CaptureSession.for_window(
         hwnd,
@@ -118,6 +185,11 @@ def main() -> int:
         "max_moves": args.max_moves,
         "segment_steps": args.segment_steps,
         "verify_every": args.verify_every,
+        "combat_max_seconds": args.combat_max_seconds,
+        "heal_below": args.heal_below,
+        "emergency_hp": args.emergency_hp,
+        "mana_below": args.mana_below,
+        "retreat_enemies": args.retreat_enemies,
         "autoloot": args.autoloot,
         "capture_source": args.capture_source,
         "segments": [],
@@ -126,6 +198,7 @@ def main() -> int:
     }
     moves = 0
     pending_return: tuple[int, int, int] | None = None
+    consecutive_heals = 0
 
     try:
         capture_session.start()
@@ -169,13 +242,42 @@ def main() -> int:
                 }
             )
 
-            if decision == "heal":
-                with coordinator.action("heal", state["frame_id"]):
-                    user32.SwitchToThisWindow(hwnd, True)
+            if decision in {"heal", "emergency_heal", "restore_mana"}:
+                if decision == "restore_mana":
+                    consecutive_heals = 0
+                else:
+                    consecutive_heals += 1
+                    if consecutive_heals > 5:
+                        raise RuntimeError("Cura nao elevou o HP apos 5 tentativas")
+                resource_keys = {
+                    "heal": (VK_O, "O"),
+                    "emergency_heal": (VK_F1, "F1"),
+                    "restore_mana": (VK_F2, "F2"),
+                }
+                virtual_key, key_name = resource_keys[decision]
+                with coordinator.action(decision, state["frame_id"]):
+                    run["chat"] = ensure_chat_off(
+                        hwnd,
+                        Path(state["image"]),
+                        capture_session,
+                        source_folder,
+                        output_folder,
+                    )
+                    focus_window(hwnd)
                     time.sleep(0.2)
-                    press_key(VK_O)
+                    press_key(virtual_key, hwnd)
+                run["segments"].append(
+                    {
+                        "type": "resource_action",
+                        "action": decision,
+                        "key": key_name,
+                        "health_percent": state["health_percent"],
+                        "mana_percent": state["mana_percent"],
+                    }
+                )
                 time.sleep(0.8)
             elif decision == "combat":
+                consecutive_heals = 0
                 if pending_return is None:
                     pending_return = position
                     run["segments"].append(
@@ -198,6 +300,12 @@ def main() -> int:
                             child_capture_source,
                             args.obs_device,
                             args.ffmpeg,
+                            args.combat_max_seconds,
+                            args.heal_below,
+                            args.emergency_hp,
+                            args.mana_below,
+                            args.retreat_enemies,
+                            list(state["enemies"]),
                         )
                     finally:
                         if resume_obs:
@@ -207,6 +315,7 @@ def main() -> int:
                 if combat["exit_code"] != 0:
                     raise RuntimeError(f"Combate terminou com codigo {combat['exit_code']}")
             else:
+                consecutive_heals = 0
                 reference = json.loads(reference_path.read_text(encoding="utf-8"))
                 remaining = min(args.segment_steps, args.max_moves - moves)
                 if pending_return is not None:
@@ -231,6 +340,9 @@ def main() -> int:
                         interrupt_check=None,
                         allowed_goal=pending_return if movement_type == "return_after_loot" else None,
                         capture_session=capture_session,
+                        heal_below=args.heal_below,
+                        emergency_hp=args.emergency_hp,
+                        mana_below=args.mana_below,
                     )
                 run["segments"].append(
                     {"type": "movement", "movement_type": movement_type, "plan": plan, "run": movement}
@@ -248,7 +360,7 @@ def main() -> int:
                     pending_return = None
                 if exit_code == 0:
                     continue
-                if state["battle_empty"]:
+                if state["battle_empty"] and not movement.get("interrupted_for_resource"):
                     raise RuntimeError(movement.get("error", "Movimento abortado"))
 
             reference = json.loads(reference_path.read_text(encoding="utf-8"))
@@ -276,8 +388,14 @@ def main() -> int:
         run["error"] = f"{type(exc).__name__}: {exc}"
         return 2
     finally:
-        run["capture"] = capture_session.stats()
-        capture_session.stop()
+        try:
+            run["capture"] = capture_session.stats()
+        except Exception as exc:
+            run["capture_stats_error"] = f"{type(exc).__name__}: {exc}"
+        try:
+            capture_session.stop()
+        except Exception as exc:
+            run["capture_stop_error"] = f"{type(exc).__name__}: {exc}"
         run["log"] = str(run_path.resolve())
         save_run(run_path, run)
         print(json.dumps({"event": "hunt_stopped", **run}, ensure_ascii=True), flush=True)

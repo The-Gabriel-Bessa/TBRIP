@@ -20,7 +20,7 @@ from autoloot.mapped_loot import perform_mapped_autoloot
 from autoloot.read_world_targets import read_world_targets
 from combat_feedback import read_combat_feedback
 from capture_internal import find_window, focus_window, press_key
-from movement.pathfinding import attack_range_approach
+from movement.pathfinding import attack_range_approach, combat_retreat_step
 from movement.safe_walk import execute_sequence
 from movement.world_model import analyze_world, localize_in_reference
 from read_battle_list import read_battle_list
@@ -32,6 +32,8 @@ from runtime.frame_source import CAPTURE_MODES, VCAM_DEVICE, CaptureSession
 user32 = ctypes.windll.user32
 VK_O = 0x4F
 VK_P = 0x50
+VK_F1 = 0x70
+VK_F2 = 0x71
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 
@@ -72,7 +74,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-seconds", type=float, default=60.0)
     parser.add_argument("--silence", type=float, default=2.0)
-    parser.add_argument("--heal-below", type=float, default=70.0)
+    parser.add_argument("--heal-below", type=float, default=90.0)
+    parser.add_argument("--emergency-hp", type=int, default=300)
+    parser.add_argument("--mana-below", type=float, default=10.0)
+    parser.add_argument("--retreat-enemies", type=int, default=4)
     parser.add_argument("--attack-interval", type=float, default=1.2)
     parser.add_argument("--capture-source", choices=CAPTURE_MODES, default="auto")
     parser.add_argument("--obs-device", default=VCAM_DEVICE)
@@ -91,6 +96,12 @@ def main() -> int:
         parser.error("--attack-interval deve ser um numero positivo")
     if not math.isfinite(args.heal_below) or not 0 <= args.heal_below <= 100:
         parser.error("--heal-below deve estar entre 0 e 100")
+    if args.emergency_hp < 0:
+        parser.error("--emergency-hp nao pode ser negativo")
+    if not math.isfinite(args.mana_below) or not 0 <= args.mana_below <= 100:
+        parser.error("--mana-below deve estar entre 0 e 100")
+    if args.retreat_enemies < 1:
+        parser.error("--retreat-enemies deve ser pelo menos 1")
 
     project = Path(__file__).resolve().parent
     source_folder = Path.home() / "AppData" / "Local" / "Tibia" / "packages" / "Tibia" / "screenshots"
@@ -103,8 +114,10 @@ def main() -> int:
     started = time.monotonic()
     attacks = 0
     heals = 0
-    last_heal = 0.0
     last_attack = 0.0
+    last_resource = 0.0
+    retreats = 0
+    last_retreat = 0.0
     reason = "max_duration"
     unmatched_scans = 0
     chat_state: dict | None = None
@@ -183,27 +196,81 @@ def main() -> int:
                 if chat_state.get("changed"):
                     continue
             hp_percent = status["health_percent"]
+            mana_percent = status["mana_percent"]
+            health_info = status.get("health") or {}
+            health_current = health_info.get("current")
             enemies = battle["matched_enemies"]
+            visible_entries = battle["visible_entries"]
             current_counts = Counter(enemy["name"] for enemy in enemies)
             for creature, count in current_counts.items():
                 maximum_counts[creature] = max(maximum_counts[creature], count)
             emit(
                 "scan",
                 hp=hp_percent,
-                mana=status["mana_percent"],
-                entries=battle["visible_entries"],
+                mana=mana_percent,
+                hp_abs=health_current,
+                entries=visible_entries,
                 enemies=[enemy["name"] for enemy in enemies],
             )
 
-            if hp_percent < args.heal_below:
-                if time.monotonic() - last_heal >= 1.2:
-                    focus_game(hwnd)
-                    press_key(VK_O, hwnd)
-                    heals += 1
-                    last_heal = time.monotonic()
-                    emit("healed", key="O", hp_before=hp_percent)
+            now = time.monotonic()
+            if health_current is not None and health_current < args.emergency_hp and now - last_resource >= 0.8:
+                focus_game(hwnd)
+                press_key(VK_F1, hwnd)
+                heals += 1
+                last_resource = now
+                emit("healed", key="F1", hp_before=hp_percent, hp_abs=health_current)
                 time.sleep(0.1)
                 continue
+            if mana_percent < args.mana_below and now - last_resource >= 0.8:
+                focus_game(hwnd)
+                press_key(VK_F2, hwnd)
+                last_resource = now
+                emit("restored_mana", key="F2", mana_before=mana_percent)
+                time.sleep(0.1)
+                continue
+            if hp_percent < args.heal_below and now - last_resource >= 0.8:
+                focus_game(hwnd)
+                press_key(VK_O, hwnd)
+                heals += 1
+                last_resource = now
+                emit("healed", key="O", hp_before=hp_percent)
+                time.sleep(0.1)
+                continue
+
+            if visible_entries >= args.retreat_enemies and now - last_retreat >= 1.0:
+                try:
+                    target_offsets = [
+                        enemy.get("screenshot_click", [0, 0])
+                        for enemy in enemies
+                    ] or [[0, -5]]
+                    retreat = combat_retreat_step(
+                        reference,
+                        tuple(status.get("coordinate") or [0, 0, 0]),
+                        target_offsets,
+                    )
+                    movement, retreat_exit = execute_sequence(
+                        retreat["keys"],
+                        tuple(status.get("coordinate") or [0, 0, 0]),
+                        reference_path,
+                        allow_blocked=False,
+                        verify_every=1,
+                        capture_session=capture_session,
+                        heal_below=args.heal_below,
+                    )
+                    retreats += 1
+                    last_retreat = now
+                    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+                    emit(
+                        "retreat",
+                        entries=visible_entries,
+                        retreat_keys=retreat["keys"],
+                        clearance=retreat["clearance"],
+                        completed=retreat_exit == 0,
+                    )
+                    continue
+                except Exception as exc:
+                    emit("retreat_failed", error=f"{type(exc).__name__}: {exc}")
 
             if battle["empty"]:
                 reason = "battle_list_empty"
@@ -387,6 +454,7 @@ def main() -> int:
         reason=reason,
         attacks=attacks,
         heals=heals,
+        retreats=retreats,
         chat=chat_state,
         autoloot=autoloot_result,
         corpse_detection=corpse_detection,

@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from attack_once import POINT, screenshot_to_screen  # noqa: E402
-from capture_internal import find_window, trigger_screenshot_with_retry  # noqa: E402
+from capture_internal import find_window, focus_window, trigger_screenshot_with_retry  # noqa: E402
 from runtime.capture_store import store_generated_screenshot  # noqa: E402
 
 if TYPE_CHECKING:
@@ -80,13 +80,19 @@ def click_tab(hwnd: int, image_path: Path, tab: dict) -> list[int]:
     screen_point = screenshot_to_screen(hwnd, image_path, tab["screenshot_click"])
     previous_cursor = POINT()
     user32.GetCursorPos(ctypes.byref(previous_cursor))
-    user32.SwitchToThisWindow(hwnd, True)
+    focus_window(hwnd)
     time.sleep(0.25)
-    user32.SetCursorPos(screen_point.x, screen_point.y)
-    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-    time.sleep(0.5)
-    user32.SetCursorPos(previous_cursor.x, previous_cursor.y)
+    try:
+        user32.SetCursorPos(screen_point.x, screen_point.y)
+        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        try:
+            time.sleep(0.05)
+        finally:
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(0.5)
+    finally:
+        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        user32.SetCursorPos(previous_cursor.x, previous_cursor.y)
     return [screen_point.x, screen_point.y]
 
 

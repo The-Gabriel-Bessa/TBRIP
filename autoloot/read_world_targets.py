@@ -29,7 +29,8 @@ def green_name_mask(roi: Image.Image) -> Image.Image:
     blue = pixels[:, :, 2].astype(np.int16)
     green_names = (green > 120) & (green > red + 50) & (green > blue + 50)
     red_names = (red > 120) & (red > green + 50) & (red > blue + 50)
-    selected = green_names | red_names
+    yellow_names = (red > 120) & (green > 100) & (blue < 100) & (red > blue + 60)
+    selected = green_names | red_names | yellow_names
     return Image.fromarray(np.where(selected, 0, 255).astype(np.uint8))
 
 
@@ -89,7 +90,13 @@ def read_world_targets(
             green_count = int(
                 ((token_green > 120) & (token_green > token_red + 50) & (token_green > token_blue + 50)).sum()
             )
-            name_color = "red" if red_count > green_count else "green"
+            yellow_count = int(
+                ((token_red > 120) & (token_green > 100) & (token_blue < 100) & (token_red > token_blue + 60)).sum()
+            )
+            name_color = max(
+                ((red_count, "red"), (green_count, "green"), (yellow_count, "yellow")),
+                key=lambda item: item[0],
+            )[1]
         else:
             name_color = "unknown"
         matches.append(

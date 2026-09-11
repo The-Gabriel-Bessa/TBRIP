@@ -16,10 +16,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from capture_internal import find_window, trigger_screenshot_with_retry  # noqa: E402
+from capture_internal import find_window, focus_window, trigger_screenshot_with_retry  # noqa: E402
 from movement.pathfinding import CARDINAL_DIRECTIONS, expected_step  # noqa: E402
 from movement.world_model import localize_in_reference, merge_observation  # noqa: E402
 from runtime.chat_state import ensure_chat_off  # noqa: E402
+from runtime.coordinator import resource_action  # noqa: E402
 from runtime.frame_source import CAPTURE_MODES, VCAM_DEVICE, CaptureSession  # noqa: E402
 from runtime.frame_pipeline import FramePipeline  # noqa: E402
 from runtime.capture_store import store_generated_screenshot  # noqa: E402
@@ -62,11 +63,14 @@ def save_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def press_movement_key(key: str) -> None:
+def press_movement_key(hwnd: int, key: str) -> None:
     virtual_key = VIRTUAL_KEYS[key]
-    user32.keybd_event(virtual_key, 0, 0, 0)
-    time.sleep(0.06)
-    user32.keybd_event(virtual_key, 0, KEYEVENTF_KEYUP, 0)
+    focus_window(hwnd)
+    try:
+        user32.keybd_event(virtual_key, 0, 0, 0)
+        time.sleep(0.06)
+    finally:
+        user32.keybd_event(virtual_key, 0, KEYEVENTF_KEYUP, 0)
 
 
 def command_groups(sequence: str, verify_every: int, allow_blocked: bool) -> list[str]:
@@ -85,6 +89,9 @@ def execute_sequence(
     stop_on_enemies: bool = True,
     allowed_goal: tuple[int, int, int] | None = None,
     capture_session: CaptureSession | None = None,
+    heal_below: float | None = None,
+    emergency_hp: int | None = None,
+    mana_below: float | None = None,
 ) -> tuple[dict, int]:
     invalid = sorted(set(sequence) - set(CARDINAL_DIRECTIONS))
     if invalid:
@@ -109,6 +116,26 @@ def execute_sequence(
         "completed": False,
     }
     run_path = runs_folder / f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_{sequence}.json"
+
+    def pending_resource(state: dict) -> str | None:
+        if heal_below is None and emergency_hp is None and mana_below is None:
+            return None
+        return resource_action(
+            state,
+            heal_below=-1 if heal_below is None else heal_below,
+            emergency_hp=-1 if emergency_hp is None else emergency_hp,
+            mana_below=-1 if mana_below is None else mana_below,
+        )
+
+    def interrupt_for_resource(state: dict, position: tuple[int, int, int]) -> tuple[dict, int] | None:
+        action = pending_resource(state)
+        if action is None:
+            return None
+        run["interrupted_for_resource"] = action
+        if action in {"heal", "emergency_heal"}:
+            run["interrupted_for_heal"] = True
+        run["final_position"] = list(position)
+        return run, 3
 
     pipeline = FramePipeline(reference)
     try:
@@ -136,6 +163,9 @@ def execute_sequence(
             raise RuntimeError(f"Posicao inicial esperada {list(start)}, observada {state['position']}")
         if stop_on_enemies and not state["battle_empty"]:
             raise RuntimeError(f"Battle List nao esta vazia: {state['enemies']}")
+        resource_interrupt = interrupt_for_resource(state, start)
+        if resource_interrupt is not None:
+            return resource_interrupt
         if analysis is not None:
             localization = localize_in_reference(analysis, reference)
             merge_observation(reference, analysis, localization)
@@ -160,12 +190,12 @@ def execute_sequence(
                 plans.append(planned)
                 planned_position = tuple(planned["expected"])
 
-            user32.SwitchToThisWindow(hwnd, True)
+            focus_window(hwnd)
             time.sleep(0.25)
             sent_plans = []
             interrupted_by_audio = False
             for planned in plans:
-                press_movement_key(planned["key"])
+                press_movement_key(hwnd, planned["key"])
                 sent_plans.append(planned)
                 command_index += 1
                 time.sleep(0.4)
@@ -209,6 +239,9 @@ def execute_sequence(
             position = tuple(state["position"])
             if stop_on_enemies and not state["battle_empty"]:
                 raise RuntimeError(f"Grupo {step['keys']}: inimigos detectados {state['enemies']}")
+            resource_interrupt = interrupt_for_resource(state, position)
+            if resource_interrupt is not None:
+                return resource_interrupt
 
         run["completed"] = True
         run["final_position"] = list(position)
@@ -237,6 +270,8 @@ def main() -> int:
     parser.add_argument("--obs-device", default=VCAM_DEVICE)
     parser.add_argument("--ffmpeg")
     args = parser.parse_args()
+    if args.verify_every < 1:
+        parser.error("--verify-every deve ser pelo menos 1")
 
     hwnd, _title = find_window("Tibia -")
     with CaptureSession.for_window(

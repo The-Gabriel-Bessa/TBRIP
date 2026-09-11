@@ -6,16 +6,46 @@ import threading
 from contextlib import contextmanager
 
 
+def resource_action(
+    snapshot: dict,
+    heal_below: float = 90.0,
+    emergency_hp: int = 300,
+    mana_below: float = 10.0,
+) -> str | None:
+    health = snapshot.get("health") or {}
+    health_current = snapshot.get("health_current", health.get("current"))
+    if health_current is not None and health_current < emergency_hp:
+        return "emergency_heal"
+    if snapshot["mana_percent"] < mana_below:
+        return "restore_mana"
+    if snapshot["health_percent"] < heal_below:
+        return "heal"
+    return None
+
+
 class ActionCoordinator:
-    def __init__(self, heal_below: float = 70.0):
+    def __init__(
+        self,
+        heal_below: float = 90.0,
+        emergency_hp: int = 300,
+        mana_below: float = 10.0,
+    ):
         self.heal_below = heal_below
+        self.emergency_hp = emergency_hp
+        self.mana_below = mana_below
         self._action_lock = threading.Lock()
         self.active_action: str | None = None
         self.frame_id: str | None = None
 
     def decide(self, snapshot: dict, loot_pending: bool = False, movement_ready: bool = True) -> str:
-        if snapshot["health_percent"] < self.heal_below:
-            return "heal"
+        resource = resource_action(
+            snapshot,
+            heal_below=self.heal_below,
+            emergency_hp=self.emergency_hp,
+            mana_below=self.mana_below,
+        )
+        if resource is not None:
+            return resource
         if not snapshot["battle_empty"]:
             return "combat"
         if loot_pending:

@@ -14,9 +14,10 @@ if errorlevel 1 (
 )
 echo.
 echo Iniciando bot...
-echo Max moves: 30 ^| Segmento: 10 ^| Verifica a cada 2 ^| Autoloot: ON
+echo Max moves: 30 ^| Segmento: 10 ^| Verifica a cada passo ^| Autoloot: ON
+echo Heal: 90%% ^| Emergencia F1: 300HP ^| Mana F2: 10%% ^| Recuo: 4 inimigos
 echo.
-python hunt_bot.py --max-moves 30 --segment-steps 10 --verify-every 2 --autoloot
+python hunt_bot.py --max-moves 30 --segment-steps 10 --verify-every 1 --autoloot --heal-below 90 --emergency-hp 300 --mana-below 10 --retreat-enemies 4 %*
 echo.
 echo ========================================
 echo Bot finalizado.

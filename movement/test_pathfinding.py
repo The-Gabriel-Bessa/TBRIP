@@ -6,6 +6,7 @@ from pathlib import Path
 
 from movement.pathfinding import (
     attack_range_approach,
+    combat_retreat_step,
     directional_exploration,
     expected_step,
     initial_departure,
@@ -93,6 +94,19 @@ class PathfindingTests(unittest.TestCase):
             allowed_goal=(0, 0, 0),
         )
         self.assertEqual(final_step["expected"], [0, 0, 0])
+
+    def test_retreat_chooses_tile_farthest_from_enemies(self):
+        reference = {
+            "tiles": {
+                "-1,0,0": "walkable_green",
+                "1,0,0": "walkable_green",
+                "0,-1,0": "walkable_green",
+            }
+        }
+        retreat = combat_retreat_step(reference, (0, 0, 0), [[2, 0]])
+
+        self.assertIn(retreat["keys"], {"A", "W"})
+        self.assertGreaterEqual(retreat["clearance"], 1)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ NO_MESSAGE_FIXTURE = Path(__file__).parent / "runtime" / "captures" / "2026-09-1
 class CombatFeedbackTests(unittest.TestCase):
     def test_normalizes_ocr_spacing(self):
         self.assertTrue(is_destination_out_of_range("Destination isoutofrange"))
+        self.assertTrue(is_destination_out_of_range("Destination is nit ak range."))
         self.assertFalse(is_destination_out_of_range("You are exhausted."))
 
     def test_detects_destination_out_of_range(self):

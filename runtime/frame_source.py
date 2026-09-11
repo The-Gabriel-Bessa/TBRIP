@@ -385,6 +385,7 @@ class CaptureSession:
             self.stream.stop()
             self.stream = None
         self.active_mode = "stopped"
+        self.chat_off_confirmed = False
 
     def fallback(self, reason: str) -> None:
         if self.stream is not None:

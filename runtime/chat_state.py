@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import re
 import time
 from pathlib import Path
@@ -10,11 +9,10 @@ from pathlib import Path
 import pytesseract
 from PIL import Image, ImageOps
 
-from capture_internal import press_key
+from capture_internal import focus_window, press_key
 from runtime.frame_source import CaptureSession
 
 
-user32 = ctypes.windll.user32
 VK_RETURN = 0x0D
 
 
@@ -73,9 +71,9 @@ def ensure_chat_off(
         capture_session.chat_off_confirmed = True
         return {"mode": "off", "changed": False, "before": before}
 
-    user32.SwitchToThisWindow(hwnd, True)
+    focus_window(hwnd)
     time.sleep(0.1)
-    press_key(VK_RETURN)
+    press_key(VK_RETURN, hwnd)
     time.sleep(0.2)
     verification_image = capture_session.capture(hwnd, source_folder, output_folder)
     after = read_chat_mode(verification_image)

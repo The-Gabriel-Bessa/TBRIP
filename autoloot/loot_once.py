@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from capture_internal import find_window, press_key  # noqa: E402
+from capture_internal import find_window, focus_window, press_key  # noqa: E402
 from autoloot.loot_log import parse_new_entries, terminal_entries  # noqa: E402
 from autoloot.select_loot_tab import (  # noqa: E402
     capture_to,
@@ -56,11 +56,11 @@ def append_ledger(ledger_path: Path, record: dict) -> None:
 
 
 def press_quick_loot(hwnd: int) -> None:
-    user32.SwitchToThisWindow(hwnd, True)
+    focus_window(hwnd)
     time.sleep(0.2)
-    user32.keybd_event(VK_MENU, 0, 0, 0)
     try:
-        press_key(VK_Q)
+        user32.keybd_event(VK_MENU, 0, 0, 0)
+        press_key(VK_Q, hwnd)
     finally:
         user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
 
@@ -86,8 +86,18 @@ def perform_autoloot(
     baseline_screenshot = capture_to(hwnd, source_folder, output_folder, capture_session)
     baseline_log = read_visible_log(baseline_screenshot)
 
-    press_quick_loot(hwnd)
     attempted_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    append_ledger(
+        ledger_path,
+        {
+            "encounter_id": encounter_id,
+            "attempted_at": attempted_at,
+            "status": "attempt_started",
+            "attempted": True,
+            "hotkey": "Alt+Q",
+        },
+    )
+    press_quick_loot(hwnd)
     time.sleep(1.0)
 
     result_tab_screen_click = click_tab(hwnd, baseline_screenshot, tab)

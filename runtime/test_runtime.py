@@ -25,7 +25,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_action_priority(self):
         coordinator = ActionCoordinator(heal_below=70)
-        base = {"health_percent": 100, "battle_empty": True}
+        base = {"health_percent": 100, "mana_percent": 100, "battle_empty": True}
 
         self.assertEqual(coordinator.decide({**base, "health_percent": 50}, loot_pending=True), "heal")
         self.assertEqual(coordinator.decide({**base, "battle_empty": False}, loot_pending=True), "combat")

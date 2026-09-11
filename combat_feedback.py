@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pytesseract
@@ -11,7 +12,8 @@ from PIL import Image, ImageOps
 
 def is_destination_out_of_range(text: str) -> bool:
     normalized = re.sub(r"[^a-z]", "", text.casefold())
-    return "destinationisoutofrange" in normalized
+    expected = "destinationisoutofrange"
+    return expected in normalized or SequenceMatcher(None, normalized, expected).ratio() >= 0.75
 
 
 def read_combat_feedback(image_path: Path) -> dict:

@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
 VK_RETURN = 0x0D
 VK_MULTIPLY = 0x6A
 KEYEVENTF_KEYUP = 0x0002
@@ -36,12 +37,51 @@ def find_window(title_fragment: str) -> tuple[int, str]:
     user32.EnumWindows(callback_type(callback), 0)
     if not matches:
         raise RuntimeError(f'Nenhuma janela contendo "{title_fragment}" foi encontrada')
+    prefix_matches = [match for match in matches if match[1].casefold().startswith(title_fragment.casefold())]
+    if prefix_matches:
+        matches = prefix_matches
+    if len(matches) > 1:
+        titles = ", ".join(repr(title) for _hwnd, title in matches)
+        raise RuntimeError(f'Mais de uma janela corresponde a "{title_fragment}": {titles}')
     return matches[0]
 
 
-def press_key(virtual_key: int) -> None:
-    user32.keybd_event(virtual_key, 0, 0, 0)
-    user32.keybd_event(virtual_key, 0, KEYEVENTF_KEYUP, 0)
+def focus_window(hwnd: int, timeout: float = 1.0) -> None:
+    """Focus the expected window and fail closed if Windows refuses the switch."""
+    if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd):
+        raise RuntimeError("A janela do Tibia nao esta mais disponivel")
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)
+    foreground = user32.GetForegroundWindow()
+    current_thread = kernel32.GetCurrentThreadId()
+    target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+    foreground_thread = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+    attached_threads = []
+    for thread_id in {target_thread, foreground_thread} - {0, current_thread}:
+        if user32.AttachThreadInput(current_thread, thread_id, True):
+            attached_threads.append(thread_id)
+    try:
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+        user32.SetActiveWindow(hwnd)
+        user32.SetFocus(hwnd)
+    finally:
+        for thread_id in attached_threads:
+            user32.AttachThreadInput(current_thread, thread_id, False)
+    deadline = time.monotonic() + timeout
+    while user32.GetForegroundWindow() != hwnd and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if user32.GetForegroundWindow() != hwnd:
+        raise RuntimeError("Nao foi possivel confirmar o foco na janela do Tibia")
+
+
+def press_key(virtual_key: int, hwnd: int | None = None) -> None:
+    if hwnd is not None:
+        focus_window(hwnd)
+    try:
+        user32.keybd_event(virtual_key, 0, 0, 0)
+    finally:
+        user32.keybd_event(virtual_key, 0, KEYEVENTF_KEYUP, 0)
 
 
 def newest_png(folder: Path) -> Path | None:
@@ -78,26 +118,24 @@ def trigger_screenshot(hwnd: int, screenshot_folder: Path) -> Path:
 
     try:
         capture_marker.write_text(str(time.time()), encoding="ascii")
-        if user32.IsIconic(hwnd):
-            user32.ShowWindow(hwnd, 9)
-        user32.SwitchToThisWindow(hwnd, True)
+        focus_window(hwnd)
         time.sleep(0.8)
 
         # If Chat is already On, capture directly and normalize back to Chat Off.
-        press_key(VK_MULTIPLY)
+        press_key(VK_MULTIPLY, hwnd)
         result = wait_for_new_png(screenshot_folder, previous_files, 2.5)
         if result is not None:
-            press_key(VK_RETURN)
+            press_key(VK_RETURN, hwnd)
             return result
 
         # Otherwise Enter enables Chat, and the second Enter returns to combat mode.
-        press_key(VK_RETURN)
+        press_key(VK_RETURN, hwnd)
         time.sleep(0.3)
         try:
-            press_key(VK_MULTIPLY)
+            press_key(VK_MULTIPLY, hwnd)
             result = wait_for_new_png(screenshot_folder, previous_files, 8.0)
         finally:
-            press_key(VK_RETURN)
+            press_key(VK_RETURN, hwnd)
         if result is None:
             raise TimeoutError("O Tibia nao criou um screenshot novo")
         return result

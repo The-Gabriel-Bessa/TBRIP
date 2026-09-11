@@ -158,6 +158,51 @@ def attack_range_approach(
     }
 
 
+def combat_retreat_step(
+    reference: dict,
+    player: tuple[int, int, int],
+    target_offsets: list[list[int]],
+) -> dict:
+    """Choose one green tile that maximizes distance from visible enemies."""
+    if not target_offsets:
+        raise RuntimeError("Nenhuma posicao de inimigo disponivel para recuo")
+
+    targets = [
+        (player[0] + offset[0], player[1] + offset[1], player[2])
+        for offset in target_offsets
+    ]
+
+    def distances(position: tuple[int, int, int]) -> list[int]:
+        return [
+            max(abs(position[0] - target[0]), abs(position[1] - target[1]))
+            for target in targets
+        ]
+
+    current_distances = distances(player)
+    options = []
+    for key in "WASD":
+        goal = destination(player, key)
+        if terrain_at(reference, goal) != "walkable_green":
+            continue
+        goal_distances = distances(goal)
+        options.append((min(goal_distances), sum(goal_distances), key, goal))
+    if not options:
+        raise RuntimeError("Nenhum tile verde adjacente disponivel para recuo")
+
+    clearance, total_distance, key, goal = max(options)
+    if clearance < min(current_distances):
+        raise RuntimeError("Todos os tiles de recuo aproximam o personagem dos inimigos")
+    return {
+        "start": list(player),
+        "goal": list(goal),
+        "keys": key,
+        "current_clearance": min(current_distances),
+        "clearance": clearance,
+        "total_distance": total_distance,
+        "target_offsets": target_offsets,
+    }
+
+
 def return_to_checkpoint(
     reference: dict,
     start: tuple[int, int, int],
