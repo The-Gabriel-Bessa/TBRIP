@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Screenshots and captures
+captures/
+captures_focused/
+internal_captures/
+runtime/captures/
+
+# Reference images (large PNGs — re-download or add locally)
+DeadBodys/
+
+# Run logs
+runs/
+movement/runs/
+
+# Runtime marker
+.capture_in_progress
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env
+.env

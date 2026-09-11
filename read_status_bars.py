@@ -1,0 +1,208 @@
+"""Read HP and mana percentages from bars in a Tibia built-in screenshot."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from pathlib import Path
+
+import numpy as np
+from PIL import Image
+
+
+BLACK = np.array([0, 0, 0], dtype=np.uint8)
+HEALTH_GREEN = np.array([0, 192, 0], dtype=np.uint8)
+MANA_BLUE = np.array([0, 0, 255], dtype=np.uint8)
+INNER_WIDTH = 29
+OUTER_WIDTH = INNER_WIDTH + 2
+BAR_HEIGHT = 2
+
+
+def find_bars(pixels: np.ndarray, color: np.ndarray) -> list[dict[str, int]]:
+    height, width, _ = pixels.shape
+    bars = []
+
+    for y in range(1, height - BAR_HEIGHT):
+        for x in range(width - OUTER_WIDTH):
+            top = pixels[y - 1, x : x + OUTER_WIDTH]
+            bottom = pixels[y + BAR_HEIGHT, x : x + OUTER_WIDTH]
+            body = pixels[y : y + BAR_HEIGHT, x : x + OUTER_WIDTH]
+            if not np.all(top == BLACK) or not np.all(bottom == BLACK):
+                continue
+            if not np.all(body[:, 0] == BLACK) or not np.all(body[:, -1] == BLACK):
+                continue
+
+            inner = body[:, 1:-1]
+            colored = np.all(inner == color, axis=2)
+            empty = np.all(inner == BLACK, axis=2)
+            if not np.all(colored | empty):
+                continue
+            if not np.array_equal(colored[0], colored[1]):
+                continue
+
+            fill = int(colored[0].sum())
+            if fill == 0:
+                continue
+            if not np.all(colored[0, :fill]) or np.any(colored[0, fill:]):
+                continue
+            bars.append({"x": x + 1, "y": y, "fill": fill})
+
+    return bars
+
+
+def read_status(image_path: Path) -> dict:
+    image = Image.open(image_path).convert("RGB")
+    pixels = np.asarray(image, dtype=np.uint8)
+    health_bars = find_bars(pixels, HEALTH_GREEN)
+    mana_bars = find_bars(pixels, MANA_BLUE)
+
+    pairs = [
+        (health, mana)
+        for health in health_bars
+        for mana in mana_bars
+        if health["x"] == mana["x"] and mana["y"] - health["y"] == 5
+    ]
+    result = {"image": str(image_path.resolve())}
+    if pairs:
+        center_x = pixels.shape[1] / 2
+        center_y = pixels.shape[0] / 2
+        health, mana = min(
+            pairs,
+            key=lambda pair: abs(pair[0]["x"] + INNER_WIDTH / 2 - center_x)
+            + abs(pair[0]["y"] - center_y),
+        )
+        result.update(
+            {
+                "health_percent": round(health["fill"] / INNER_WIDTH * 100, 1),
+                "mana_percent": round(mana["fill"] / INNER_WIDTH * 100, 1),
+                "health_fill_pixels": health["fill"],
+                "mana_fill_pixels": mana["fill"],
+                "bar_inner_width": INNER_WIDTH,
+                "bar_position": {
+                    "x": health["x"],
+                    "health_y": health["y"],
+                    "mana_y": mana["y"],
+                },
+                "note": "As barras mostram percentual; valores numericos exigem screenshot da interface completa.",
+            }
+        )
+    numeric = read_numeric_hud(image)
+    if numeric:
+        result.update(numeric)
+        result["note"] = "Valores numericos lidos da interface completa; barras usadas como verificacao."
+    if not pairs and not numeric:
+        raise RuntimeError("Nao foi possivel ler HP e mana da captura")
+    return result
+
+
+def read_status_fast(image_path: Path) -> dict:
+    """Read only the centered character bars, without numeric HUD OCR."""
+    with Image.open(image_path) as source:
+        image = source.convert("RGB")
+    width, height = image.size
+    gameplay_center_x = round((width - 352) / 2)
+    gameplay_center_y = min(302, height // 2)
+    left = max(0, gameplay_center_x - 90)
+    top = max(0, gameplay_center_y - 90)
+    right = min(width, gameplay_center_x + 90)
+    bottom = min(height, gameplay_center_y + 30)
+    pixels = np.asarray(image.crop((left, top, right, bottom)), dtype=np.uint8)
+    health_bars = find_bars(pixels, HEALTH_GREEN)
+    mana_bars = find_bars(pixels, MANA_BLUE)
+    pairs = [
+        (health, mana)
+        for health in health_bars
+        for mana in mana_bars
+        if health["x"] == mana["x"] and mana["y"] - health["y"] == 5
+    ]
+    if not pairs:
+        raise RuntimeError("Nao foi possivel ler rapidamente as barras do personagem")
+    center_x = pixels.shape[1] / 2
+    center_y = pixels.shape[0] / 2
+    health, mana = min(
+        pairs,
+        key=lambda pair: abs(pair[0]["x"] + INNER_WIDTH / 2 - center_x)
+        + abs(pair[0]["y"] - center_y),
+    )
+    return {
+        "image": str(image_path.resolve()),
+        "health_percent": round(health["fill"] / INNER_WIDTH * 100, 1),
+        "mana_percent": round(mana["fill"] / INNER_WIDTH * 100, 1),
+        "health_fill_pixels": health["fill"],
+        "mana_fill_pixels": mana["fill"],
+        "bar_inner_width": INNER_WIDTH,
+        "bar_position": {
+            "x": left + health["x"],
+            "health_y": top + health["y"],
+            "mana_y": top + mana["y"],
+        },
+        "mode": "fast_character_bars",
+    }
+
+
+def ocr_fraction(image: Image.Image, box: tuple[int, int, int, int]) -> dict | None:
+    try:
+        import pytesseract
+    except ImportError:
+        return None
+
+    crop = image.crop(box).getchannel("R")
+    binary = crop.point(lambda value: 0 if value > 180 else 255)
+    enlarged = binary.resize((binary.width * 10, binary.height * 10))
+    text = pytesseract.image_to_string(
+        enlarged,
+        config="--psm 7 -c tessedit_char_whitelist=0123456789/()",
+    )
+    match = re.search(r"(\d+)\s*/\s*(\d+)", text)
+    if not match:
+        return None
+    current, maximum = map(int, match.groups())
+    if maximum <= 0 or current > maximum:
+        return None
+    return {"current": current, "maximum": maximum, "ocr_text": text.strip()}
+
+
+def read_numeric_hud(image: Image.Image) -> dict:
+    width, height = image.size
+    if width < 1000:
+        return {}
+
+    strip_height = max(20, round(height * 0.028))
+    health = ocr_fraction(
+        image,
+        (round(width * 0.14), 0, round(width * 0.235), strip_height),
+    )
+    mana = ocr_fraction(
+        image,
+        (round(width * 0.48), 0, round(width * 0.62), strip_height),
+    )
+    if health is None or mana is None:
+        return {}
+    return {
+        "health": health,
+        "mana": mana,
+        "health_numeric_percent": round(health["current"] / health["maximum"] * 100, 1),
+        "mana_numeric_percent": round(mana["current"] / mana["maximum"] * 100, 1),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("image", nargs="?", type=Path, help="Screenshot interno do Tibia")
+    args = parser.parse_args()
+
+    image_path = args.image
+    if image_path is None:
+        capture_dir = Path(__file__).resolve().parent / "internal_captures"
+        files = list(capture_dir.glob("*.png"))
+        if not files:
+            raise RuntimeError("Nenhuma captura interna encontrada")
+        image_path = max(files, key=lambda path: path.stat().st_mtime_ns)
+
+    print(json.dumps(read_status(image_path), indent=2, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
