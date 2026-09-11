@@ -115,9 +115,12 @@ def main() -> int:
     attacks = 0
     heals = 0
     last_attack = 0.0
-    last_resource = 0.0
+    last_heal_o = 0.0
+    last_heal_f1 = 0.0
+    last_mana_f2 = 0.0
     retreats = 0
     last_retreat = 0.0
+    last_target_name = None
     reason = "max_duration"
     unmatched_scans = 0
     chat_state: dict | None = None
@@ -214,26 +217,26 @@ def main() -> int:
             )
 
             now = time.monotonic()
-            if health_current is not None and health_current < args.emergency_hp and now - last_resource >= 0.8:
+            if health_current is not None and health_current < args.emergency_hp and now - last_heal_f1 >= 2.0:
                 focus_game(hwnd)
                 press_key(VK_F1, hwnd)
                 heals += 1
-                last_resource = now
+                last_heal_f1 = now
                 emit("healed", key="F1", hp_before=hp_percent, hp_abs=health_current)
                 time.sleep(0.1)
                 continue
-            if mana_percent < args.mana_below and now - last_resource >= 0.8:
+            if mana_percent < args.mana_below and now - last_mana_f2 >= 3.0:
                 focus_game(hwnd)
                 press_key(VK_F2, hwnd)
-                last_resource = now
+                last_mana_f2 = now
                 emit("restored_mana", key="F2", mana_before=mana_percent)
                 time.sleep(0.1)
                 continue
-            if hp_percent < args.heal_below and now - last_resource >= 0.8:
+            if hp_percent < args.heal_below and now - last_heal_o >= 1.2:
                 focus_game(hwnd)
                 press_key(VK_O, hwnd)
                 heals += 1
-                last_resource = now
+                last_heal_o = now
                 emit("healed", key="O", hp_before=hp_percent)
                 time.sleep(0.1)
                 continue
@@ -308,6 +311,8 @@ def main() -> int:
                             reference_path=reference_path,
                             capture_session=capture_session,
                             heal_below=args.heal_below,
+                            emergency_hp=args.emergency_hp,
+                            mana_below=args.mana_below,
                         )
                         emit(
                             "autoloot_finished",
@@ -369,7 +374,13 @@ def main() -> int:
                             if until_attack > 0:
                                 time.sleep(min(0.1, until_attack))
                                 continue
-                            point = click_target_and_fire(hwnd, saved, target)
+                            if target["name"] != last_target_name:
+                                point = click_target_and_fire(hwnd, saved, target)
+                                last_target_name = target["name"]
+                            else:
+                                focus_game(hwnd)
+                                press_key(VK_P, hwnd)
+                                point = "key_only"
                             attacks += 1
                             last_attack = time.monotonic()
                             emit("attacked", target=target["name"], key="P", screen_click=point)
@@ -431,7 +442,13 @@ def main() -> int:
             if until_attack > 0:
                 time.sleep(min(0.1, until_attack))
                 continue
-            point = click_target_and_fire(hwnd, saved, target)
+            if target["name"] != last_target_name:
+                point = click_target_and_fire(hwnd, saved, target)
+                last_target_name = target["name"]
+            else:
+                focus_game(hwnd)
+                press_key(VK_P, hwnd)
+                point = "key_only"
             attacks += 1
             last_attack = time.monotonic()
             emit("attacked", target=target["name"], key="P", screen_click=point)

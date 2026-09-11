@@ -73,6 +73,8 @@ def perform_mapped_autoloot(
     reference_path: Path,
     capture_session: CaptureSession | None = None,
     heal_below: float | None = None,
+    emergency_hp: int | None = None,
+    mana_below: float | None = None,
 ) -> dict:
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     analysis = analyze_world(current_screenshot, verify_name=False)
@@ -113,6 +115,8 @@ def perform_mapped_autoloot(
             allow_blocked=False,
             capture_session=capture_session,
             heal_below=heal_below,
+            emergency_hp=emergency_hp,
+            mana_below=mana_below,
         )
         if exit_code != 0:
             results.append({"corpse": list(corpse), "status": "movement_aborted", "plan": plan, "run": run})
