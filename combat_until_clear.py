@@ -262,12 +262,22 @@ def main() -> int:
                         clearance=retreat["clearance"],
                         completed=retreat_exit == 0,
                     )
-                    continue
+                    if retreat_exit == 0:
+                        continue
                 except Exception as exc:
                     emit("retreat_failed", error=f"{type(exc).__name__}: {exc}")
 
-            if battle["empty"]:
-                reason = "battle_list_empty"
+            if battle["empty"] or (not enemies):
+                if not battle["empty"]:
+                    unmatched_scans += 1
+                    if unmatched_scans < 2:
+                        time.sleep(0.4)
+                        continue
+                    reason = "entries_not_whitelisted"
+                else:
+                    reason = "battle_list_empty"
+                    unmatched_scans = 0
+
                 expected_corpses = {
                     creature: maximum_counts[creature]
                     for creature in maximum_counts
@@ -326,13 +336,6 @@ def main() -> int:
                     }
                     emit("autoloot_deferred", **autoloot_result)
                 break
-            if not enemies:
-                unmatched_scans += 1
-                if unmatched_scans >= 2:
-                    reason = "entries_not_whitelisted"
-                    break
-                time.sleep(0.4)
-                continue
 
             unmatched_scans = 0
             target = enemies[0]
@@ -415,7 +418,6 @@ def main() -> int:
                         )
                         if exit_code != 0:
                             reason = "target_chase_failed"
-                            break
                         unresolved_out_of_range = 0
                         reference = json.loads(reference_path.read_text(encoding="utf-8"))
                         continue
@@ -465,7 +467,7 @@ def main() -> int:
         corpse_detection=corpse_detection,
         capture=capture_stats,
     )
-    non_fatal = {"battle_list_empty", "target_out_of_range_unresolved", "entries_not_whitelisted"}
+    non_fatal = {"battle_list_empty", "target_out_of_range_unresolved", "entries_not_whitelisted", "target_chase_failed"}
     return 0 if reason in non_fatal else 2
 
 
