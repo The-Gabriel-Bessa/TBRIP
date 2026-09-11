@@ -381,7 +381,19 @@ def main() -> int:
                             chased_target["tile_offset_from_player"],
                             attack_range=1,
                         )
-                        chase_keys = chase["keys"][:2]
+                        chase_keys = chase["keys"][:3]
+                        if not chase_keys:
+                            try:
+                                wide_chase = attack_range_approach(
+                                    reference,
+                                    tuple(localization["coordinate"]),
+                                    chased_target["tile_offset_from_player"],
+                                    attack_range=3,
+                                    max_steps=12,
+                                )
+                                chase_keys = wide_chase["keys"][:3]
+                            except Exception:
+                                chase_keys = ""
                         if not chase_keys:
                             unresolved_out_of_range = 0
                             emit("target_already_in_range", target=target["name"])
@@ -448,7 +460,7 @@ def main() -> int:
                     visible_targets=len(visible_targets),
                     attempts=unresolved_out_of_range,
                 )
-                if unresolved_out_of_range >= 3:
+                if unresolved_out_of_range >= 5:
                     reason = "target_out_of_range_unresolved"
                     break
             else:
