@@ -138,7 +138,7 @@ def main() -> int:
     parser.add_argument("--verify-every", type=int, default=1)
     parser.add_argument("--heal-below", type=float, default=90.0)
     parser.add_argument("--emergency-hp", type=int, default=300)
-    parser.add_argument("--mana-below", type=float, default=10.0)
+    parser.add_argument("--mana-below", type=int, default=100)
     parser.add_argument("--retreat-enemies", type=int, default=4)
     parser.add_argument("--combat-max-seconds", type=float, default=60.0)
     parser.add_argument("--autoloot", action=argparse.BooleanOptionalAction, default=True)

@@ -76,21 +76,7 @@ def perform_mapped_autoloot(
     emergency_hp: int | None = None,
     mana_below: float | None = None,
 ) -> dict:
-    reference = json.loads(reference_path.read_text(encoding="utf-8"))
-    analysis = analyze_world(current_screenshot, verify_name=False)
-    localization = localize_in_reference(analysis, reference)
-    if not localization["localized"]:
-        return {"status": "aborted_unlocalized", "encounter_id": encounter_id}
-
-    position = tuple(localization["coordinate"])
-    corpse_coordinates = []
-    for detection in corpse_detection.get("detections", []):
-        offset = detection["tile_offset_from_player"]
-        coordinate = (position[0] + offset[0], position[1] + offset[1], position[2])
-        if coordinate not in corpse_coordinates:
-            corpse_coordinates.append(coordinate)
-    if not corpse_coordinates:
-        return {"status": "no_corpses_detected", "encounter_id": encounter_id, "attempted": False}
+    from autoloot.detect_corpses import detect_corpses
 
     hwnd, _title = find_window("Tibia -")
     tibia_dir = Path.home() / "AppData" / "Local" / "Tibia" / "packages" / "Tibia"
@@ -98,14 +84,34 @@ def perform_mapped_autoloot(
     output_folder = PROJECT_ROOT / "runtime" / "captures"
     ledger_path = Path(__file__).resolve().parent / "loot_attempts.jsonl"
     results = []
+    looted_offsets: set[tuple[int, int]] = set()
+    max_attempts = 6
+    position = None
 
-    for index, corpse in enumerate(corpse_coordinates, start=1):
+    pending_detections = list(corpse_detection.get("detections", []))
+
+    for attempt in range(max_attempts):
+        if not pending_detections:
+            break
+
+        detection = pending_detections.pop(0)
+        offset = tuple(detection["tile_offset_from_player"])
+        if offset in looted_offsets:
+            continue
+
         reference = json.loads(reference_path.read_text(encoding="utf-8"))
-        offset = [corpse[0] - position[0], corpse[1] - position[1]]
+        analysis = analyze_world(current_screenshot, verify_name=False)
+        localization = localize_in_reference(analysis, reference)
+        if not localization["localized"]:
+            break
+        position = tuple(localization["coordinate"])
+        corpse = (position[0] + offset[0], position[1] + offset[1], position[2])
+
         try:
-            plan = plan_corpse_approach(reference, position, offset)
+            plan = plan_corpse_approach(reference, position, list(offset))
         except RuntimeError as exc:
             results.append({"corpse": list(corpse), "status": "unreachable", "error": str(exc)})
+            looted_offsets.add(offset)
             continue
 
         run, exit_code = execute_sequence(
@@ -118,14 +124,20 @@ def perform_mapped_autoloot(
             emergency_hp=emergency_hp,
             mana_below=mana_below,
         )
+        if exit_code == 3:
+            results.append({"corpse": list(corpse), "status": "interrupted_for_resource", "plan": plan, "run": run})
+            looted_offsets.add(offset)
+            continue
         if exit_code != 0:
             results.append({"corpse": list(corpse), "status": "movement_aborted", "plan": plan, "run": run})
+            looted_offsets.add(offset)
             break
+
         position = tuple(run["final_position"])
         current_screenshot = latest_screenshot(run)
         loot = perform_autoloot(
             hwnd=hwnd,
-            encounter_id=f"{encounter_id}-corpse-{index}",
+            encounter_id=f"{encounter_id}-corpse-{len(results)+1}",
             current_screenshot=current_screenshot,
             source_folder=source_folder,
             output_folder=output_folder,
@@ -133,13 +145,28 @@ def perform_mapped_autoloot(
             capture_session=capture_session,
         )
         results.append({"corpse": list(corpse), "status": "attempted", "plan": plan, "loot": loot})
+        looted_offsets.add(offset)
+
+        try:
+            creature_counts: dict[str, int] = {}
+            for d in pending_detections + [detection]:
+                creature = d.get("creature", "")
+                if creature:
+                    creature_counts[creature] = creature_counts.get(creature, 0) + 1
+            re_detection = detect_corpses(current_screenshot, {k: 10 for k in creature_counts})
+            for d in re_detection.get("detections", []):
+                new_offset = tuple(d["tile_offset_from_player"])
+                if new_offset not in looted_offsets:
+                    pending_detections.append(d)
+        except Exception:
+            pass
 
     attempted = sum(result["status"] == "attempted" for result in results)
     return {
-        "status": "completed" if attempted == len(corpse_coordinates) else "partial",
+        "status": "completed" if attempted > 0 else "no_corpses_detected",
         "encounter_id": encounter_id,
-        "corpses": len(corpse_coordinates),
+        "corpses": len(results),
         "attempted": attempted,
-        "final_position": list(position),
+        "final_position": list(position) if position is not None else [],
         "results": results,
     }
