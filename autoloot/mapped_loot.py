@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from autoloot.loot_once import perform_autoloot
 from capture_internal import find_window
@@ -13,6 +14,9 @@ from movement.world_model import analyze_world, localize_in_reference
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+if TYPE_CHECKING:
+    from runtime.frame_source import CaptureSession
 
 
 ADJACENT_OFFSETS = (
@@ -67,6 +71,7 @@ def perform_mapped_autoloot(
     current_screenshot: Path,
     corpse_detection: dict,
     reference_path: Path,
+    capture_session: CaptureSession | None = None,
 ) -> dict:
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     analysis = analyze_world(current_screenshot, verify_name=False)
@@ -100,7 +105,13 @@ def perform_mapped_autoloot(
             results.append({"corpse": list(corpse), "status": "unreachable", "error": str(exc)})
             continue
 
-        run, exit_code = execute_sequence(plan["keys"], position, reference_path, allow_blocked=False)
+        run, exit_code = execute_sequence(
+            plan["keys"],
+            position,
+            reference_path,
+            allow_blocked=False,
+            capture_session=capture_session,
+        )
         if exit_code != 0:
             results.append({"corpse": list(corpse), "status": "movement_aborted", "plan": plan, "run": run})
             break
@@ -113,6 +124,7 @@ def perform_mapped_autoloot(
             source_folder=source_folder,
             output_folder=output_folder,
             ledger_path=ledger_path,
+            capture_session=capture_session,
         )
         results.append({"corpse": list(corpse), "status": "attempted", "plan": plan, "loot": loot})
 

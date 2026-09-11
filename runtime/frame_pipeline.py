@@ -39,6 +39,7 @@ class FramePipeline:
         snapshot = {
             "frame_id": image_path.stem,
             "image": str(image_path.resolve()),
+            "capture_source": "obs" if image_path.stem.startswith("obs_") else "screenshot",
             "captured_at_ns": image_path.stat().st_mtime_ns,
             "position": localization.get("coordinate"),
             "localized": localization["localized"],

@@ -7,6 +7,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytesseract
 from PIL import Image
@@ -20,6 +21,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from attack_once import POINT, screenshot_to_screen  # noqa: E402
 from capture_internal import find_window, trigger_screenshot_with_retry  # noqa: E402
 from runtime.capture_store import store_generated_screenshot  # noqa: E402
+
+if TYPE_CHECKING:
+    from runtime.frame_source import CaptureSession
 
 
 user32 = ctypes.windll.user32
@@ -86,7 +90,14 @@ def click_tab(hwnd: int, image_path: Path, tab: dict) -> list[int]:
     return [screen_point.x, screen_point.y]
 
 
-def capture_to(hwnd: int, source_folder: Path, output_folder: Path) -> Path:
+def capture_to(
+    hwnd: int,
+    source_folder: Path,
+    output_folder: Path,
+    capture_session: CaptureSession | None = None,
+) -> Path:
+    if capture_session is not None:
+        return capture_session.capture(hwnd, source_folder, output_folder)
     source = trigger_screenshot_with_retry(hwnd, source_folder)
     return store_generated_screenshot(source, output_folder)
 

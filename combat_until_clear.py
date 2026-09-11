@@ -18,19 +18,19 @@ LOOTABLE_CREATURES = {"Amazon", "Witch", "Valkyrie"}
 from autoloot.mapped_loot import perform_mapped_autoloot
 from autoloot.read_world_targets import read_world_targets
 from combat_feedback import read_combat_feedback
-from capture_internal import find_window, press_key, trigger_screenshot_with_retry
+from capture_internal import find_window, press_key
 from movement.pathfinding import attack_range_approach
 from movement.safe_walk import execute_sequence
 from movement.world_model import analyze_world, localize_in_reference
 from read_battle_list import read_battle_list
 from read_status_bars import read_status_fast
-from runtime.capture_store import store_generated_screenshot
+from runtime.chat_state import ensure_chat_off
+from runtime.frame_source import CAPTURE_MODES, VCAM_DEVICE, CaptureSession
 
 
 user32 = ctypes.windll.user32
 VK_O = 0x4F
 VK_P = 0x50
-VK_RETURN = 0x0D
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 
@@ -66,6 +66,10 @@ def main() -> int:
     parser.add_argument("--max-seconds", type=float, default=60.0)
     parser.add_argument("--silence", type=float, default=2.0)
     parser.add_argument("--heal-below", type=float, default=70.0)
+    parser.add_argument("--attack-interval", type=float, default=1.2)
+    parser.add_argument("--capture-source", choices=CAPTURE_MODES, default="auto")
+    parser.add_argument("--obs-device", default=VCAM_DEVICE)
+    parser.add_argument("--ffmpeg")
     parser.add_argument(
         "--autoloot",
         action=argparse.BooleanOptionalAction,
@@ -86,9 +90,10 @@ def main() -> int:
     attacks = 0
     heals = 0
     last_heal = 0.0
+    last_attack = 0.0
     reason = "max_duration"
     unmatched_scans = 0
-    chat_off_confirmed = False
+    chat_state: dict | None = None
     encounter_id = f"combat-{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}"
     autoloot_result: dict | None = None
     corpse_detection: dict | None = None
@@ -97,23 +102,62 @@ def main() -> int:
     detected_deaths: Counter = Counter()
     unresolved_out_of_range = 0
 
-    emit("combat_loop_started", window=title)
+    capture_session = CaptureSession.for_window(
+        hwnd,
+        mode=args.capture_source,
+        ffmpeg_path=args.ffmpeg,
+        device=args.obs_device,
+    )
+    capture_session.start()
     readers = ThreadPoolExecutor(max_workers=5, thread_name_prefix="combat-reader")
+    capture_mode = capture_session.active_mode
+    emit("combat_loop_started", window=title, capture=capture_session.stats())
+
+    def analyze_frame(image: Path) -> dict:
+        battle_future = readers.submit(read_battle_list, image)
+        status_future = readers.submit(read_status_fast, image)
+        feedback_future = readers.submit(read_combat_feedback, image)
+        battle = battle_future.result()
+        status = status_future.result()
+        feedback = feedback_future.result()
+        result = {"battle": battle, "status": status, "feedback": feedback}
+        if feedback["destination_out_of_range"]:
+            targets_future = readers.submit(read_world_targets, image)
+            map_future = readers.submit(analyze_world, image, "Rafaelkrosa", False)
+            result["world_targets"] = targets_future.result()
+            result["map_analysis"] = map_future.result()
+        else:
+            result["world_targets"] = {"targets": []}
+            result["map_analysis"] = None
+        return result
+
     try:
         while time.monotonic() - started < args.max_seconds:
-            source = trigger_screenshot_with_retry(hwnd, source_folder)
-            chat_off_confirmed = True
-            saved = store_generated_screenshot(source, output_folder)
-            battle_future = readers.submit(read_battle_list, saved)
-            status_future = readers.submit(read_status_fast, saved)
-            feedback_future = readers.submit(read_combat_feedback, saved)
-            targets_future = readers.submit(read_world_targets, saved)
-            map_future = readers.submit(analyze_world, saved, "Rafaelkrosa", False)
-            battle = battle_future.result()
-            status = status_future.result()
-            feedback = feedback_future.result()
-            world_targets = targets_future.result()
-            map_analysis = map_future.result()
+            saved, scan = capture_session.capture_and_analyze(
+                hwnd,
+                source_folder,
+                output_folder,
+                analyze_frame,
+            )
+            if capture_session.active_mode != capture_mode:
+                capture_mode = capture_session.active_mode
+                emit("capture_source_changed", capture=capture_session.stats())
+            battle = scan["battle"]
+            status = scan["status"]
+            feedback = scan["feedback"]
+            world_targets = scan["world_targets"]
+            map_analysis = scan["map_analysis"]
+            if chat_state is None:
+                chat_state = ensure_chat_off(
+                    hwnd,
+                    saved,
+                    capture_session,
+                    source_folder,
+                    output_folder,
+                )
+                emit("chat_mode_checked", **chat_state)
+                if chat_state.get("changed"):
+                    continue
             hp_percent = status["health_percent"]
             enemies = battle["matched_enemies"]
             current_counts = Counter(enemy["name"] for enemy in enemies)
@@ -130,12 +174,16 @@ def main() -> int:
                 enemies=[enemy["name"] for enemy in enemies],
             )
 
-            if hp_percent < args.heal_below and time.monotonic() - last_heal >= 1.2:
-                focus_game(hwnd)
-                press_key(VK_O)
-                heals += 1
-                last_heal = time.monotonic()
-                emit("healed", key="O", hp_before=hp_percent)
+            if hp_percent < args.heal_below:
+                if time.monotonic() - last_heal >= 1.2:
+                    focus_game(hwnd)
+                    press_key(VK_O)
+                    heals += 1
+                    last_heal = time.monotonic()
+                    emit("healed", key="O", hp_before=hp_percent)
+                if not battle["empty"]:
+                    time.sleep(0.1)
+                    continue
 
             if battle["empty"]:
                 reason = "battle_list_empty"
@@ -171,6 +219,7 @@ def main() -> int:
                             current_screenshot=saved,
                             corpse_detection=corpse_detection,
                             reference_path=reference_path,
+                            capture_session=capture_session,
                         )
                         emit(
                             "autoloot_finished",
@@ -245,6 +294,7 @@ def main() -> int:
                             verify_every=1,
                             initial_state=chase_state,
                             stop_on_enemies=False,
+                            capture_session=capture_session,
                         )
                         emit(
                             "target_chase",
@@ -276,34 +326,28 @@ def main() -> int:
                     break
             else:
                 unresolved_out_of_range = 0
+            until_attack = args.attack_interval - (time.monotonic() - last_attack)
+            if until_attack > 0:
+                time.sleep(min(0.1, until_attack))
+                continue
             point = click_target_and_fire(hwnd, saved, target)
             attacks += 1
+            last_attack = time.monotonic()
             emit("attacked", target=target["name"], key="P", screen_click=point)
-            fire_until = time.monotonic() + 2.5
-            next_fire = time.monotonic() + 1.2
-            while time.monotonic() < fire_until:
-                now = time.monotonic()
-                if now >= next_fire:
-                    focus_game(hwnd)
-                    press_key(VK_P)
-                    attacks += 1
-                    emit("fired", target=target["name"], key="P")
-                    next_fire = now + 1.2
-                time.sleep(0.05)
     finally:
         readers.shutdown(wait=True, cancel_futures=True)
-        if chat_off_confirmed:
-            focus_game(hwnd)
-            press_key(VK_RETURN)
+        capture_stats = capture_session.stats()
+        capture_session.stop()
 
     emit(
         "combat_loop_stopped",
         reason=reason,
         attacks=attacks,
         heals=heals,
-        chat="on" if chat_off_confirmed else "unknown",
+        chat=chat_state,
         autoloot=autoloot_result,
         corpse_detection=corpse_detection,
+        capture=capture_stats,
     )
     return 0
 

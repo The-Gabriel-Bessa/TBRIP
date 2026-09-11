@@ -56,8 +56,11 @@ def parse_coordinate(key: str) -> tuple[int, int, int]:
 
 
 def find_player_marker(pixels: np.ndarray, minimap_box: list[int]) -> dict:
-    white = np.all(pixels == (255, 255, 255), axis=2).astype(np.uint8)
-    count, _labels, stats, centers = cv2.connectedComponentsWithStats(white, 8)
+    white = np.all(pixels == (255, 255, 255), axis=2)
+    # OBS converts RGB through YUV, so white commonly returns around 235.
+    channel_spread = pixels.max(axis=2).astype(np.int16) - pixels.min(axis=2).astype(np.int16)
+    white |= (pixels.min(axis=2) >= 210) & (channel_spread <= 20)
+    count, _labels, stats, centers = cv2.connectedComponentsWithStats(white.astype(np.uint8), 8)
     image_center = np.array([(pixels.shape[1] - 1) / 2, (pixels.shape[0] - 1) / 2])
     candidates = []
     for index in range(1, count):
@@ -92,10 +95,11 @@ def find_player_marker(pixels: np.ndarray, minimap_box: list[int]) -> dict:
 
 
 def classify_tile(tile: np.ndarray) -> tuple[str, int]:
-    counts = {
-        terrain: int(np.all(tile == color, axis=2).sum())
-        for terrain, color in TERRAIN_COLORS.items()
-    }
+    values = tile.astype(np.int16)
+    counts = {}
+    for terrain, color in TERRAIN_COLORS.items():
+        difference = values - np.asarray(color, dtype=np.int16)
+        counts[terrain] = int((np.linalg.norm(difference, axis=2) <= 60).sum())
     terrain, pixels = max(counts.items(), key=lambda item: item[1])
     if pixels < tile.shape[0] * tile.shape[1] // 2:
         return "unknown", pixels

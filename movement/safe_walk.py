@@ -19,6 +19,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from capture_internal import find_window, trigger_screenshot_with_retry  # noqa: E402
 from movement.pathfinding import CARDINAL_DIRECTIONS, expected_step  # noqa: E402
 from movement.world_model import localize_in_reference, merge_observation  # noqa: E402
+from runtime.chat_state import ensure_chat_off  # noqa: E402
+from runtime.frame_source import CAPTURE_MODES, VCAM_DEVICE, CaptureSession  # noqa: E402
 from runtime.frame_pipeline import FramePipeline  # noqa: E402
 from runtime.capture_store import store_generated_screenshot  # noqa: E402
 
@@ -40,7 +42,16 @@ def capture_state(
     source_folder: Path,
     output_folder: Path,
     pipeline: FramePipeline,
+    capture_session: CaptureSession | None = None,
 ) -> tuple[dict, dict]:
+    if capture_session is not None:
+        _image, result = capture_session.capture_and_analyze(
+            hwnd,
+            source_folder,
+            output_folder,
+            pipeline.analyze,
+        )
+        return result
     source = trigger_screenshot_with_retry(hwnd, source_folder)
     image = store_generated_screenshot(source, output_folder)
     return pipeline.analyze(image)
@@ -73,6 +84,7 @@ def execute_sequence(
     interrupt_check: Callable[[], bool] | None = None,
     stop_on_enemies: bool = True,
     allowed_goal: tuple[int, int, int] | None = None,
+    capture_session: CaptureSession | None = None,
 ) -> tuple[dict, int]:
     invalid = sorted(set(sequence) - set(CARDINAL_DIRECTIONS))
     if invalid:
@@ -101,11 +113,25 @@ def execute_sequence(
     pipeline = FramePipeline(reference)
     try:
         if initial_state is None:
-            state, analysis = capture_state(hwnd, source_folder, output_folder, pipeline)
+            state, analysis = capture_state(
+                hwnd,
+                source_folder,
+                output_folder,
+                pipeline,
+                capture_session,
+            )
         else:
             state = dict(initial_state)
             analysis = None
         run["initial"] = state
+        if capture_session is not None:
+            run["chat"] = ensure_chat_off(
+                hwnd,
+                Path(state["image"]),
+                capture_session,
+                source_folder,
+                output_folder,
+            )
         if not state["localized"] or state["position"] != list(start):
             raise RuntimeError(f"Posicao inicial esperada {list(start)}, observada {state['position']}")
         if stop_on_enemies and not state["battle_empty"]:
@@ -151,7 +177,13 @@ def execute_sequence(
                 groups.insert(0, unsent)
 
             expected_position = tuple(sent_plans[-1]["expected"])
-            state, analysis = capture_state(hwnd, source_folder, output_folder, pipeline)
+            state, analysis = capture_state(
+                hwnd,
+                source_folder,
+                output_folder,
+                pipeline,
+                capture_session,
+            )
             step = {
                 "index": len(run["steps"]) + 1,
                 "command_indexes": [command_index - len(sent_plans) + 1, command_index],
@@ -201,15 +233,26 @@ def main() -> int:
     )
     parser.add_argument("--allow-blocked", action="store_true")
     parser.add_argument("--verify-every", type=int, default=1)
+    parser.add_argument("--capture-source", choices=CAPTURE_MODES, default="auto")
+    parser.add_argument("--obs-device", default=VCAM_DEVICE)
+    parser.add_argument("--ffmpeg")
     args = parser.parse_args()
 
-    run, exit_code = execute_sequence(
-        args.sequence.upper(),
-        args.start,
-        args.reference,
-        args.allow_blocked,
-        verify_every=args.verify_every,
-    )
+    hwnd, _title = find_window("Tibia -")
+    with CaptureSession.for_window(
+        hwnd,
+        mode=args.capture_source,
+        ffmpeg_path=args.ffmpeg,
+        device=args.obs_device,
+    ) as capture_session:
+        run, exit_code = execute_sequence(
+            args.sequence.upper(),
+            args.start,
+            args.reference,
+            args.allow_blocked,
+            verify_every=args.verify_every,
+            capture_session=capture_session,
+        )
     print(json.dumps(run, indent=2, ensure_ascii=False))
     return exit_code
 

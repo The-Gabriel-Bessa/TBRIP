@@ -3,7 +3,8 @@
 ## Resumo Rápido
 - **Janela**: `Tibia - Rafaelkrosa` (título) — `hwnd` via `find_window("Tibia -")`
 - **Área client**: 1282×709 px — usa `WDA_MONITOR` (todos métodos padrão de captura retornam preto)
-- **Execução**: `C:\Users\bessa\Documents\YiffyRip\TibiaRIP` — `python hunt_bot.py` (adm)
+- **Captura primaria**: `OBS Virtual Camera` via FFmpeg/DirectShow; screenshot interno e fallback
+- **Execução**: `C:\Users\bessa\Documents\YiffyRip\TibiaRIP` — `python hunt_bot.py --capture-source obs` (adm)
 - **GitHub**: `https://github.com/The-Gabriel-Bessa/TBRIP`
 
 ---
@@ -58,6 +59,7 @@ TibiaRIP/
 ├── runtime/
 │   ├── coordinator.py       # ActionCoordinator (decide/heal/combat/move)
 │   ├── frame_pipeline.py    # FramePipeline com OCR readers
+│   ├── frame_source.py      # Stream OBS sincronizado + fallback de screenshot
 │   └── capture_store.py     # store_generated_screenshot
 ├── autoloot/
 │   ├── detect_corpses.py    # Detecta corpos por cor na imagem
@@ -90,23 +92,24 @@ LOOTABLE_CREATURES = {"Amazon", "Witch", "Valkyrie"}
 ## Parâmetros de Execução
 
 ```bash
-python hunt_bot.py --max-moves 30 --segment-steps 15 --heal-below 70
+python hunt_bot.py --max-moves 30 --segment-steps 15 --heal-below 70 --capture-source obs
 python hunt_bot.py --no-autoloot
 ```
 
 - `segment_steps=15`: cada segmento de movimento pode ter até 15 passos
-- `verify_every=2`: screenshot a cada 2 passos durante movimento
+- `verify_every=1`: frame novo e validacao a cada passo durante movimento
+- `capture-source=auto`: OBS com fallback automatico; use `obs` para exigir o stream
 
 ---
 
 ## COMO COMBATE FUNCIONA (atualizado — SEM áudio)
 
-1. `hunt_bot.py` detecta inimigo via screenshot + OCR (read_battle_list)
+1. `hunt_bot.py` detecta inimigo no stream OBS + OCR (read_battle_list)
 2. Entra em `combat_until_clear.py` como subprocesso
-3. Subprocesso faz scan de frame → battle list OCR → detecta `matched_enemies`
+3. O processo principal libera a camera; o subprocesso assume o mesmo stream e detecta `matched_enemies`
 4. Clica no 1º slot da battle list + P (attack_once)
-5. Loop repete P por 2.5s, depois volta ao scan
-6. Sai quando `battle["empty"]` = true por 2 scans consecutivos
+5. Cada frame novo pode curar, perseguir, atacar ou encerrar; ataques respeitam intervalo de 1.2s
+6. Sai assim que `battle["empty"]` = true
 7. Autoloot: detecta corpos por cor → Alt+Q
 8. Retorna ao hunt_bot.py com checkpoint salvo
 
@@ -141,10 +144,11 @@ python hunt_bot.py --no-autoloot
 | `movement/pathfinding.py`       | A* no reference JSON, retorna sequência WASD        |
 | `movement/safe_walk.py`         | Executa sequência de teclas com interrupt_check      |
 | `movement/world_model.py`       | Localiza posição no mapa de referência               |
-| `read_battle_list.py`           # OCR battle list — retorna matched_enemies       |
+| `read_battle_list.py`           | OCR battle list — retorna matched_enemies       |
 | `read_status_bars.py`           | OCR HP/Mana/Level                                    |
-| `runtime/frame_pipeline.py`     # FramePipeline com todos os OCR readers          |
-| `runtime/coordinator.py`        # ActionCoordinator — decide estado               |
+| `runtime/frame_pipeline.py`     | FramePipeline com todos os OCR readers          |
+| `runtime/frame_source.py`       | Camera OBS continua, sync, normalizacao e fallback |
+| `runtime/coordinator.py`        | ActionCoordinator — decide estado               |
 | `autoloot/detect_corpses.py`    | Detecta corpos por cor na imagem                     |
 | `autoloot/mapped_loot.py`       | Executa Alt+Q autoloot                               |
 
@@ -160,15 +164,20 @@ python hunt_bot.py --no-autoloot
 6. **audio interrupt** — removido (interrupt_check=None)
 7. **LOOTABLE_CREATURES** — filtro aplicado em combat_until_clear.py
 8. **Supressão de áudio** — toda removida (era 1.0s após cada P)
+9. **Captura OBS integrada** — patrulha, combate, perseguicao e autoloot compartilham frames continuos
+10. **Combate reativo** — removida espera fixa de 2.5s; cura bloqueia acoes de menor prioridade
+11. **Deteccao robusta** — barras e minimapa toleram escala e conversao YUV do OBS
 
 ---
 
 ## Notas para Próxima IA
 
-- **O bot NÃO usa áudio para nada** — combate é 100% screenshot/OCR
+- **O bot NÃO usa áudio para nada** — combate é 100% frame visual/OCR
 - O `fast_attack.py` existe mas não é importado em nenhum lugar ativo
-- O WDA captura retorna sempre preto — não adianta tentar其他 métodos de captura
+- WGC, PrintWindow e dxcam continuam bloqueados pelo WDA; OBS Game Capture + Virtual Camera funciona
+- No teste de 11/09/2026 o OBS entregou 2 Amazons, HP/mana 100% e localizacao `[0,0,0]` com acordo 1.0
+- A Camera Virtual deve estar iniciada e a fonte do Tibia em `Fit to screen`, sem stretch/crop manual
 - O reference JSON (`amazon_camp_cave_reference.json`) é o mapa de navegação
 - `capture_state()` retorna `{"position": [x,y,z], "battle_empty": bool, "localized": bool}`
-- O bot faz `capture_state` a cada passo durante movimento (verify_every)
+- O bot solicita um frame posterior a cada passo durante movimento (`verify_every=1` por padrao)
 - `execute_sequence` retorna `({"steps": [...], "error": ...}, exit_code)`

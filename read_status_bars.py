@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -51,18 +52,59 @@ def find_bars(pixels: np.ndarray, color: np.ndarray) -> list[dict[str, int]]:
     return bars
 
 
-def read_status(image_path: Path) -> dict:
-    image = Image.open(image_path).convert("RGB")
-    pixels = np.asarray(image, dtype=np.uint8)
+def find_scaled_bars(pixels: np.ndarray, color: np.ndarray) -> list[dict[str, int]]:
+    """Find bars after OBS has rescaled the client and altered exact RGB values."""
+    values = pixels.astype(np.int16)
+    red, green, blue = values[:, :, 0], values[:, :, 1], values[:, :, 2]
+    if np.array_equal(color, HEALTH_GREEN):
+        mask = (green > 100) & (green > red + 45) & (green > blue + 45)
+    elif np.array_equal(color, MANA_BLUE):
+        mask = (blue > 100) & (blue > red + 45) & (blue > green + 45)
+    else:
+        return []
+
+    count, _labels, stats, _centers = cv2.connectedComponentsWithStats(mask.astype(np.uint8), 8)
+    bars = []
+    for x, y, width, height, area in stats[1:count]:
+        if not (1 <= width <= INNER_WIDTH + 4 and 1 <= height <= 5):
+            continue
+        if area < width * height * 0.55:
+            continue
+        bars.append({"x": int(x), "y": int(y), "fill": int(width)})
+    return bars
+
+
+def find_bar_pairs(pixels: np.ndarray) -> list[tuple[dict[str, int], dict[str, int]]]:
     health_bars = find_bars(pixels, HEALTH_GREEN)
     mana_bars = find_bars(pixels, MANA_BLUE)
-
-    pairs = [
+    exact = [
         (health, mana)
         for health in health_bars
         for mana in mana_bars
         if health["x"] == mana["x"] and mana["y"] - health["y"] == 5
     ]
+    if exact:
+        return exact
+
+    health_bars = find_scaled_bars(pixels, HEALTH_GREEN)
+    mana_bars = find_scaled_bars(pixels, MANA_BLUE)
+    return [
+        (health, mana)
+        for health in health_bars
+        for mana in mana_bars
+        if abs(health["x"] - mana["x"]) <= 2 and 3 <= mana["y"] - health["y"] <= 7
+    ]
+
+
+def fill_percent(fill: int) -> float:
+    # One source pixel can disappear in OBS's canvas scaling even on a full bar.
+    return 100.0 if fill >= INNER_WIDTH - 1 else round(fill / INNER_WIDTH * 100, 1)
+
+
+def read_status(image_path: Path) -> dict:
+    image = Image.open(image_path).convert("RGB")
+    pixels = np.asarray(image, dtype=np.uint8)
+    pairs = find_bar_pairs(pixels)
     result = {"image": str(image_path.resolve())}
     if pairs:
         center_x = pixels.shape[1] / 2
@@ -74,8 +116,8 @@ def read_status(image_path: Path) -> dict:
         )
         result.update(
             {
-                "health_percent": round(health["fill"] / INNER_WIDTH * 100, 1),
-                "mana_percent": round(mana["fill"] / INNER_WIDTH * 100, 1),
+                "health_percent": fill_percent(health["fill"]),
+                "mana_percent": fill_percent(mana["fill"]),
                 "health_fill_pixels": health["fill"],
                 "mana_fill_pixels": mana["fill"],
                 "bar_inner_width": INNER_WIDTH,
@@ -108,14 +150,7 @@ def read_status_fast(image_path: Path) -> dict:
     right = min(width, gameplay_center_x + 90)
     bottom = min(height, gameplay_center_y + 30)
     pixels = np.asarray(image.crop((left, top, right, bottom)), dtype=np.uint8)
-    health_bars = find_bars(pixels, HEALTH_GREEN)
-    mana_bars = find_bars(pixels, MANA_BLUE)
-    pairs = [
-        (health, mana)
-        for health in health_bars
-        for mana in mana_bars
-        if health["x"] == mana["x"] and mana["y"] - health["y"] == 5
-    ]
+    pairs = find_bar_pairs(pixels)
     if not pairs:
         raise RuntimeError("Nao foi possivel ler rapidamente as barras do personagem")
     center_x = pixels.shape[1] / 2
@@ -127,8 +162,8 @@ def read_status_fast(image_path: Path) -> dict:
     )
     return {
         "image": str(image_path.resolve()),
-        "health_percent": round(health["fill"] / INNER_WIDTH * 100, 1),
-        "mana_percent": round(mana["fill"] / INNER_WIDTH * 100, 1),
+        "health_percent": fill_percent(health["fill"]),
+        "mana_percent": fill_percent(mana["fill"]),
         "health_fill_pixels": health["fill"],
         "mana_fill_pixels": mana["fill"],
         "bar_inner_width": INNER_WIDTH,

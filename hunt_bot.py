@@ -16,8 +16,10 @@ from capture_internal import find_window, press_key
 from movement.pathfinding import initial_departure, patrol_route, return_to_checkpoint
 from movement.safe_walk import capture_state, execute_sequence
 from movement.world_model import localize_in_reference, merge_observation
+from runtime.chat_state import ensure_chat_off
 from runtime.coordinator import ActionCoordinator
 from runtime.frame_pipeline import FramePipeline
+from runtime.frame_source import CAPTURE_MODES, VCAM_DEVICE, CaptureSession
 
 
 user32 = ctypes.windll.user32
@@ -30,7 +32,13 @@ def latest_state(run: dict) -> dict:
     return run["initial"]
 
 
-def run_combat_process(project: Path, autoloot: bool) -> dict:
+def run_combat_process(
+    project: Path,
+    autoloot: bool,
+    capture_source: str,
+    obs_device: str,
+    ffmpeg: str | None,
+) -> dict:
     command = [
         sys.executable,
         str(project / "combat_until_clear.py"),
@@ -38,7 +46,13 @@ def run_combat_process(project: Path, autoloot: bool) -> dict:
         "60",
         "--heal-below",
         "70",
+        "--capture-source",
+        capture_source,
+        "--obs-device",
+        obs_device,
     ]
+    if ffmpeg:
+        command.extend(["--ffmpeg", ffmpeg])
     if not autoloot:
         command.append("--no-autoloot")
     process = subprocess.Popen(
@@ -74,9 +88,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-moves", type=int, default=30)
     parser.add_argument("--segment-steps", type=int, default=15)
-    parser.add_argument("--verify-every", type=int, default=2)
+    parser.add_argument("--verify-every", type=int, default=1)
     parser.add_argument("--heal-below", type=float, default=70.0)
     parser.add_argument("--autoloot", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--capture-source", choices=CAPTURE_MODES, default="auto")
+    parser.add_argument("--obs-device", default=VCAM_DEVICE)
+    parser.add_argument("--ffmpeg")
     args = parser.parse_args()
 
     project = Path(__file__).resolve().parent
@@ -88,6 +105,12 @@ def main() -> int:
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     coordinator = ActionCoordinator(args.heal_below)
     hwnd, title = find_window("Tibia -")
+    capture_session = CaptureSession.for_window(
+        hwnd,
+        mode=args.capture_source,
+        ffmpeg_path=args.ffmpeg,
+        device=args.obs_device,
+    )
     visits: Counter = Counter()
     recent = deque(maxlen=20)
     run = {
@@ -96,6 +119,7 @@ def main() -> int:
         "segment_steps": args.segment_steps,
         "verify_every": args.verify_every,
         "autoloot": args.autoloot,
+        "capture_source": args.capture_source,
         "segments": [],
         "combats": [],
         "completed": False,
@@ -104,8 +128,22 @@ def main() -> int:
     pending_return: tuple[int, int, int] | None = None
 
     try:
+        capture_session.start()
         with FramePipeline(reference) as pipeline:
-            state, analysis = capture_state(hwnd, source_folder, output_folder, pipeline)
+            state, analysis = capture_state(
+                hwnd,
+                source_folder,
+                output_folder,
+                pipeline,
+                capture_session,
+            )
+        run["chat"] = ensure_chat_off(
+            hwnd,
+            Path(state["image"]),
+            capture_session,
+            source_folder,
+            output_folder,
+        )
         if not state["localized"]:
             raise RuntimeError("Posicao inicial nao localizada")
         position = tuple(state["position"])
@@ -149,7 +187,22 @@ def main() -> int:
                     )
                 # O subprocesso de combate detecta inimigos via frame
                 with coordinator.action("combat", state["frame_id"]):
-                    combat = run_combat_process(project, args.autoloot)
+                    resume_obs = capture_session.uses_obs
+                    child_capture_source = args.capture_source if resume_obs else "screenshot"
+                    if resume_obs:
+                        capture_session.stop()
+                    try:
+                        combat = run_combat_process(
+                            project,
+                            args.autoloot,
+                            child_capture_source,
+                            args.obs_device,
+                            args.ffmpeg,
+                        )
+                    finally:
+                        if resume_obs:
+                            time.sleep(0.15)
+                            capture_session.start()
                 run["combats"].append(combat)
                 if combat["exit_code"] != 0:
                     raise RuntimeError(f"Combate terminou com codigo {combat['exit_code']}")
@@ -177,6 +230,7 @@ def main() -> int:
                         initial_state=state,
                         interrupt_check=None,
                         allowed_goal=pending_return if movement_type == "return_after_loot" else None,
+                        capture_session=capture_session,
                     )
                 run["segments"].append(
                     {"type": "movement", "movement_type": movement_type, "plan": plan, "run": movement}
@@ -199,7 +253,13 @@ def main() -> int:
 
             reference = json.loads(reference_path.read_text(encoding="utf-8"))
             with FramePipeline(reference) as pipeline:
-                state, _analysis = capture_state(hwnd, source_folder, output_folder, pipeline)
+                state, _analysis = capture_state(
+                    hwnd,
+                    source_folder,
+                    output_folder,
+                    pipeline,
+                    capture_session,
+                )
             if not state["localized"]:
                 raise RuntimeError("Posicao perdida depois da acao")
             position = tuple(state["position"])
@@ -216,6 +276,8 @@ def main() -> int:
         run["error"] = f"{type(exc).__name__}: {exc}"
         return 2
     finally:
+        run["capture"] = capture_session.stats()
+        capture_session.stop()
         run["log"] = str(run_path.resolve())
         save_run(run_path, run)
         print(json.dumps({"event": "hunt_stopped", **run}, ensure_ascii=True), flush=True)

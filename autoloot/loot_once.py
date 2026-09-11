@@ -8,6 +8,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,9 @@ from autoloot.select_loot_tab import (  # noqa: E402
     locate_loot_tab,
     read_visible_log,
 )
+
+if TYPE_CHECKING:
+    from runtime.frame_source import CaptureSession
 
 
 user32 = ctypes.windll.user32
@@ -68,6 +72,7 @@ def perform_autoloot(
     source_folder: Path,
     output_folder: Path,
     ledger_path: Path,
+    capture_session: CaptureSession | None = None,
 ) -> dict:
     if encounter_id in attempted_encounters(ledger_path):
         return {
@@ -78,7 +83,7 @@ def perform_autoloot(
 
     tab = locate_loot_tab(current_screenshot)
     tab_screen_click = click_tab(hwnd, current_screenshot, tab)
-    baseline_screenshot = capture_to(hwnd, source_folder, output_folder)
+    baseline_screenshot = capture_to(hwnd, source_folder, output_folder, capture_session)
     baseline_log = read_visible_log(baseline_screenshot)
 
     press_quick_loot(hwnd)
@@ -86,7 +91,7 @@ def perform_autoloot(
     time.sleep(1.0)
 
     result_tab_screen_click = click_tab(hwnd, baseline_screenshot, tab)
-    result_screenshot = capture_to(hwnd, source_folder, output_folder)
+    result_screenshot = capture_to(hwnd, source_folder, output_folder, capture_session)
     result_log = read_visible_log(result_screenshot)
     new_entries = parse_new_entries(baseline_log, result_log)
     confirmed_entries = terminal_entries(new_entries)
