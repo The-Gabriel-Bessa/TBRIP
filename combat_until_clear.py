@@ -445,7 +445,6 @@ def main() -> int:
         "error",
         "partial",
         "aborted_unlocalized",
-        "no_corpses_detected",
     }:
         reason = "autoloot_failed"
 
