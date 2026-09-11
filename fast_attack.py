@@ -24,6 +24,7 @@ MOUSEEVENTF_LEFTUP = 0x0004
 # Calibrado a partir de captura 1280px: entry "Amazon" em ~x=0.905, y=0.605.
 BATTLE_FIRST_REL_X = 0.905
 BATTLE_FIRST_REL_Y = 0.605
+BATTLE_FIRST_Y_OFFSET = 16  # Ajuste fino: desce 16px na tela
 
 
 class RECT(ctypes.Structure):
@@ -42,7 +43,7 @@ def battle_first_slot_screen_point(hwnd: int) -> tuple[int, int]:
     client_width = client.right - client.left
     client_height = client.bottom - client.top
     client_x = int(client_width * BATTLE_FIRST_REL_X)
-    client_y = int(client_height * BATTLE_FIRST_REL_Y)
+    client_y = int(client_height * BATTLE_FIRST_REL_Y) + BATTLE_FIRST_Y_OFFSET
     point_type = wintypes.POINT(client_x, client_y)
     if not user32.ClientToScreen(hwnd, ctypes.byref(point_type)):
         raise ctypes.WinError()
@@ -96,6 +97,11 @@ class FastAttackGuard(threading.Thread):
         self.last_attack = 0.0
         self.fast_attacks = 0
         self._suppressed_until = 0.0
+        self._battle_list_has_enemies = True  # assume true ate provar o contrario
+
+    def set_battle_list_state(self, has_enemies: bool) -> None:
+        """Chamado pelo loop principal pra informar se tem inimigos."""
+        self._battle_list_has_enemies = has_enemies
 
     def suppress_for(self, seconds: float) -> None:
         """Suprime o guard por X segundos (apos nosso proprio ataque)."""
@@ -109,8 +115,10 @@ class FastAttackGuard(threading.Thread):
             return False
         if self.marker is not None and self.marker.exists():
             return False
+        # Nao dispara se nao tem inimigos na battle list
+        if not self._battle_list_has_enemies:
+            return False
         # Nao dispara se o AudioTracker nunca detectou som acima do threshold.
-        # Evita falsos positivos no startup e durante silencio absoluto.
         if not self.audio.ever_heard_sound:
             return False
         # Suprimido apos nosso proprio ataque
@@ -120,7 +128,6 @@ class FastAttackGuard(threading.Thread):
             silent = self.audio.silent_for()
         except Exception:
             return False
-        # `silent` > 0: precisa ter acontecido ALGUM som (last_sound > 0).
         if silent <= 0.0 or silent > self.trigger_window:
             return False
         now = time.monotonic()
@@ -141,6 +148,5 @@ class FastAttackGuard(threading.Thread):
                         except Exception:
                             pass
             except Exception:
-                # Nunca derruba o bot por causa do guard; o loop lento cobre.
                 pass
             time.sleep(0.02)

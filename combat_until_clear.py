@@ -5,18 +5,12 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
-import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from ctypes import wintypes
 from pathlib import Path
 
-import comtypes
-from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
-
 from attack_once import POINT, screenshot_to_screen
-from fast_attack import FastAttackGuard
 from autoloot.detect_corpses import detect_corpses
 
 # Criaturas que dropam itens desejados (Witch Broom, Girlish Hair Decoration, Protective Charm)
@@ -46,61 +40,6 @@ def emit(event: str, **values) -> None:
         json.dumps({"time": time.strftime("%H:%M:%S"), "event": event, **values}, ensure_ascii=True),
         flush=True,
     )
-
-
-def window_process_id(hwnd: int) -> int:
-    process_id = wintypes.DWORD()
-    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id))
-    return process_id.value
-
-
-class AudioTracker(threading.Thread):
-    def __init__(self, process_id: int, marker: Path, threshold: float = 0.05):
-        super().__init__(daemon=True)
-        self.process_id = process_id
-        self.marker = marker
-        self.threshold = threshold
-        self.last_sound = 0.0
-        self.ever_heard_sound = False
-        self.peak_max = 0.0
-        self.error: str | None = None
-        self.stop_event = threading.Event()
-
-    def run(self) -> None:
-        comtypes.CoInitialize()
-        try:
-            session = next(
-                item
-                for item in AudioUtilities.GetAllSessions()
-                if item.ProcessId == self.process_id
-            )
-            meter = session._ctl.QueryInterface(IAudioMeterInformation)
-            marker_was_present = False
-            ignored_until = 0.0
-            while not self.stop_event.is_set():
-                now = time.monotonic()
-                marker_present = self.marker.exists()
-                if marker_was_present and not marker_present:
-                    ignored_until = now + 0.75
-                marker_was_present = marker_present
-                peak = float(meter.GetPeakValue())
-                self.peak_max = max(self.peak_max, peak)
-                if marker_present or now < ignored_until:
-                    self.last_sound = now
-                elif peak >= self.threshold:
-                    self.last_sound = now
-                    self.ever_heard_sound = True
-                time.sleep(0.01)
-        except Exception as exc:
-            self.error = f"{type(exc).__name__}: {exc}"
-        finally:
-            comtypes.CoUninitialize()
-
-    def stop(self) -> None:
-        self.stop_event.set()
-
-    def silent_for(self) -> float:
-        return time.monotonic() - self.last_sound
 
 
 def focus_game(hwnd: int) -> None:
@@ -140,24 +79,9 @@ def main() -> int:
     output_folder = project / "runtime" / "captures"
     reference_path = project / "movement" / "amazon_camp_cave_reference.json"
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
-    marker = project / ".capture_in_progress"
     output_folder.mkdir(parents=True, exist_ok=True)
 
     hwnd, title = find_window("Tibia -")
-    process_id = window_process_id(hwnd)
-    audio = AudioTracker(process_id, marker)
-    audio.start()
-    # Insta-ataque: qualquer som do Tibia -> clica no 1o slot da battle list + P
-    # em ~50-100ms, sem esperar o scan lento (screenshot + OCR = 2-4s).
-    fast_guard = FastAttackGuard(
-        hwnd,
-        audio,
-        marker=marker,
-        trigger_window=0.35,
-        cooldown=0.9,
-        on_attack=lambda result: emit("fast_attack", reason="audio_trigger", **result),
-    )
-    fast_guard.start()
     started = time.monotonic()
     attacks = 0
     heals = 0
@@ -173,7 +97,7 @@ def main() -> int:
     detected_deaths: Counter = Counter()
     unresolved_out_of_range = 0
 
-    emit("combat_loop_started", pid=process_id, window=title)
+    emit("combat_loop_started", window=title)
     readers = ThreadPoolExecutor(max_workers=5, thread_name_prefix="combat-reader")
     try:
         while time.monotonic() - started < args.max_seconds:
@@ -204,7 +128,6 @@ def main() -> int:
                 mana=status["mana_percent"],
                 entries=battle["visible_entries"],
                 enemies=[enemy["name"] for enemy in enemies],
-                silent_for=round(audio.silent_for(), 2),
             )
 
             if hp_percent < args.heal_below and time.monotonic() - last_heal >= 1.2:
@@ -242,8 +165,6 @@ def main() -> int:
                         emit("corpse_detection_failed", **corpse_detection)
                 if args.autoloot and (attacks > 0 or expected_corpses):
                     emit("autoloot_started", encounter_id=encounter_id, hotkey="Alt+Q")
-                    # Loot mexe no mouse/teclado: suspende o guard para nao roubar o clique.
-                    fast_guard.suspended = True
                     try:
                         autoloot_result = perform_mapped_autoloot(
                             encounter_id=encounter_id,
@@ -264,8 +185,6 @@ def main() -> int:
                             "error": f"{type(exc).__name__}: {exc}",
                         }
                         emit("autoloot_failed", **autoloot_result)
-                    finally:
-                        fast_guard.suspended = False
                 elif attacks > 0:
                     autoloot_result = {
                         "status": "pending_corpse_approach",
@@ -358,58 +277,31 @@ def main() -> int:
             else:
                 unresolved_out_of_range = 0
             point = click_target_and_fire(hwnd, saved, target)
-            fast_guard.suppress_for(0.5)
             attacks += 1
             emit("attacked", target=target["name"], key="P", screen_click=point)
-            # Loop curto: o guard ja faz insta-click em som novo, entao aqui so
-            # mantemos o ataque no alvo atual e voltamos rapido ao rescan para
-            # detectar morte / novo inimigo sem os 6s antigos de espera.
             fire_until = time.monotonic() + 2.5
             next_fire = time.monotonic() + 1.2
-            loop_started = time.monotonic()
             while time.monotonic() < fire_until:
                 now = time.monotonic()
-                if audio.ever_heard_sound and audio.silent_for() >= args.silence:
-                    emit("audio_silent_rescan", silent_for=round(audio.silent_for(), 2))
-                    break
-                if now - loop_started > 1.0 and audio.silent_for() < 0.3:
-                    # Som fresco = algo aconteceu (dano/morte/novo agressor):
-                    # o guard ja clicou no 1o slot, volta ao scan para confirmar.
-                    emit("audio_fresh_rescan", silent_for=round(audio.silent_for(), 2))
-                    break
                 if now >= next_fire:
                     focus_game(hwnd)
                     press_key(VK_P)
-                    fast_guard.suppress_for(0.5)
                     attacks += 1
                     emit("fired", target=target["name"], key="P")
                     next_fire = now + 1.2
                 time.sleep(0.05)
     finally:
         readers.shutdown(wait=True, cancel_futures=True)
-        try:
-            fast_guard.stop()
-        except Exception:
-            pass
-        audio.stop()
-        audio.join(timeout=2)
         if chat_off_confirmed:
             focus_game(hwnd)
             press_key(VK_RETURN)
 
-    try:
-        fast_attacks = fast_guard.fast_attacks
-    except Exception:
-        fast_attacks = 0
     emit(
         "combat_loop_stopped",
         reason=reason,
         attacks=attacks,
-        fast_attacks=fast_attacks,
         heals=heals,
-        audio_peak=round(audio.peak_max, 6),
         chat="on" if chat_off_confirmed else "unknown",
-        audio_error=audio.error,
         autoloot=autoloot_result,
         corpse_detection=corpse_detection,
     )

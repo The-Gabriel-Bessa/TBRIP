@@ -13,8 +13,6 @@ from datetime import datetime
 from pathlib import Path
 
 from capture_internal import find_window, press_key
-from combat_until_clear import AudioTracker, window_process_id
-from fast_attack import FastAttackGuard
 from movement.pathfinding import initial_departure, patrol_route, return_to_checkpoint
 from movement.safe_walk import capture_state, execute_sequence
 from movement.world_model import localize_in_reference, merge_observation
@@ -75,7 +73,7 @@ def save_run(path: Path, run: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-moves", type=int, default=30)
-    parser.add_argument("--segment-steps", type=int, default=10)
+    parser.add_argument("--segment-steps", type=int, default=15)
     parser.add_argument("--verify-every", type=int, default=2)
     parser.add_argument("--heal-below", type=float, default=70.0)
     parser.add_argument("--autoloot", action=argparse.BooleanOptionalAction, default=True)
@@ -90,24 +88,6 @@ def main() -> int:
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
     coordinator = ActionCoordinator(args.heal_below)
     hwnd, title = find_window("Tibia -")
-    marker = project / ".capture_in_progress"
-    audio = AudioTracker(window_process_id(hwnd), marker)
-    audio.start()
-    # Guard reativo: ouviu som AGORA -> insta-clica 1o slot da battle list + P.
-    # Cobre o buraco de 2-4s entre scans (screenshot + OCR) durante patrulha.
-    def _on_fast_attack(result: dict) -> None:
-        print(
-            json.dumps(
-                {"event": "fast_attack", "reason": "audio_trigger", **result},
-                ensure_ascii=True,
-            ),
-            flush=True,
-        )
-
-    fast_guard = FastAttackGuard(
-        hwnd, audio, marker=marker, trigger_window=0.35, cooldown=1.0, on_attack=_on_fast_attack
-    )
-    fast_guard.start()
     visits: Counter = Counter()
     recent = deque(maxlen=20)
     run = {
@@ -141,7 +121,6 @@ def main() -> int:
         ):
             if pending_return == position and state["battle_empty"]:
                 pending_return = None
-            state["audio_alert"] = audio.ever_heard_sound and audio.silent_for() < 2.0
             decision = coordinator.decide(state)
             run["segments"].append(
                 {
@@ -168,14 +147,9 @@ def main() -> int:
                             "frame_id": state["frame_id"],
                         }
                     )
-                # O subprocesso de combate tem o proprio guard; suspende o daqui
-                # para nao dar double-click no mesmo slot.
-                fast_guard.suspended = True
-                try:
-                    with coordinator.action("combat", state["frame_id"]):
-                        combat = run_combat_process(project, args.autoloot)
-                finally:
-                    fast_guard.suspended = False
+                # O subprocesso de combate detecta inimigos via frame
+                with coordinator.action("combat", state["frame_id"]):
+                    combat = run_combat_process(project, args.autoloot)
                 run["combats"].append(combat)
                 if combat["exit_code"] != 0:
                     raise RuntimeError(f"Combate terminou com codigo {combat['exit_code']}")
@@ -194,16 +168,6 @@ def main() -> int:
                     plan = patrol_route(reference, position, visits, remaining, tuple(recent))
                     movement_type = "patrol"
                 with coordinator.action("move", state["frame_id"]):
-                    # Aborta o grupo de teclas assim que ouvir som (provavel ataque
-                    # de inimigo). O FastAttackGuard ja clica no 1o slot em ~ms, e
-                    # o proximo capture_state confirma e entra em "combat".
-                    def _audio_interrupt() -> bool:
-                        try:
-                            s = audio.silent_for()
-                            return audio.ever_heard_sound and 0.0 < s < 0.4
-                        except Exception:
-                            return False
-
                     movement, exit_code = execute_sequence(
                         plan["keys"],
                         position,
@@ -211,7 +175,7 @@ def main() -> int:
                         allow_blocked=False,
                         verify_every=args.verify_every,
                         initial_state=state,
-                        interrupt_check=_audio_interrupt,
+                        interrupt_check=None,
                         allowed_goal=pending_return if movement_type == "return_after_loot" else None,
                     )
                 run["segments"].append(
@@ -252,14 +216,6 @@ def main() -> int:
         run["error"] = f"{type(exc).__name__}: {exc}"
         return 2
     finally:
-        try:
-            fast_guard.stop()
-        except Exception:
-            pass
-        audio.stop()
-        audio.join(timeout=2)
-        run["audio_peak"] = round(audio.peak_max, 6)
-        run["audio_error"] = audio.error
         run["log"] = str(run_path.resolve())
         save_run(run_path, run)
         print(json.dumps({"event": "hunt_stopped", **run}, ensure_ascii=True), flush=True)
