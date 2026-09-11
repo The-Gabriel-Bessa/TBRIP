@@ -127,6 +127,8 @@ def main() -> int:
     corpse_detection: dict | None = None
     maximum_counts: Counter = Counter(args.initial_enemy)
     unresolved_out_of_range = 0
+    chase_failed_indices: set[int] = set()
+    prev_enemy_names: tuple[str, ...] = ()
 
     capture_session = CaptureSession.for_window(
         hwnd,
@@ -202,6 +204,10 @@ def main() -> int:
             health_current = health_info.get("current")
             enemies = battle["matched_enemies"]
             visible_entries = battle["visible_entries"]
+            enemy_names = tuple(enemy["name"] for enemy in enemies)
+            if enemy_names != prev_enemy_names:
+                chase_failed_indices.clear()
+                prev_enemy_names = enemy_names
             current_counts = Counter(enemy["name"] for enemy in enemies)
             for creature, count in current_counts.items():
                 maximum_counts[creature] = max(maximum_counts[creature], count)
@@ -338,7 +344,16 @@ def main() -> int:
                 break
 
             unmatched_scans = 0
-            target = enemies[0]
+            target = None
+            target_index = -1
+            for idx, candidate in enumerate(enemies):
+                if idx not in chase_failed_indices:
+                    target = candidate
+                    target_index = idx
+                    break
+            if target is None:
+                reason = "all_targets_chase_failed"
+                break
             if feedback["destination_out_of_range"]:
                 visible_targets = [
                     item for item in world_targets["targets"] if item["name"] == target["name"]
@@ -418,6 +433,7 @@ def main() -> int:
                         )
                         if exit_code != 0:
                             reason = "target_chase_failed"
+                            chase_failed_indices.add(target_index)
                         unresolved_out_of_range = 0
                         reference = json.loads(reference_path.read_text(encoding="utf-8"))
                         continue
@@ -467,7 +483,7 @@ def main() -> int:
         corpse_detection=corpse_detection,
         capture=capture_stats,
     )
-    non_fatal = {"battle_list_empty", "target_out_of_range_unresolved", "entries_not_whitelisted", "target_chase_failed"}
+    non_fatal = {"battle_list_empty", "target_out_of_range_unresolved", "entries_not_whitelisted", "target_chase_failed", "all_targets_chase_failed"}
     return 0 if reason in non_fatal else 2
 
 
