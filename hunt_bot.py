@@ -60,7 +60,6 @@ def run_combat_process(
     max_seconds: float,
     heal_below: float,
     emergency_hp: int,
-    mana_below: float,
     retreat_enemies: int,
     initial_enemies: list[str],
 ) -> dict:
@@ -73,8 +72,6 @@ def run_combat_process(
         str(heal_below),
         "--emergency-hp",
         str(emergency_hp),
-        "--mana-below",
-        str(mana_below),
         "--retreat-enemies",
         str(retreat_enemies),
         "--capture-source",
@@ -138,7 +135,6 @@ def main() -> int:
     parser.add_argument("--verify-every", type=int, default=1)
     parser.add_argument("--heal-below", type=float, default=90.0)
     parser.add_argument("--emergency-hp", type=int, default=300)
-    parser.add_argument("--mana-below", type=int, default=100)
     parser.add_argument("--retreat-enemies", type=int, default=4)
     parser.add_argument("--combat-max-seconds", type=float, default=60.0)
     parser.add_argument("--autoloot", action=argparse.BooleanOptionalAction, default=True)
@@ -156,8 +152,6 @@ def main() -> int:
         parser.error("--heal-below deve estar entre 0 e 100")
     if args.emergency_hp < 0:
         parser.error("--emergency-hp nao pode ser negativo")
-    if not math.isfinite(args.mana_below) or not 0 <= args.mana_below <= 100:
-        parser.error("--mana-below deve estar entre 0 e 100")
     if args.retreat_enemies < 1:
         parser.error("--retreat-enemies deve ser pelo menos 1")
     if not math.isfinite(args.combat_max_seconds) or args.combat_max_seconds <= 0:
@@ -170,7 +164,7 @@ def main() -> int:
     output_folder = project / "runtime" / "captures"
     run_path = project / "runs" / f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_hunt.json"
     reference = json.loads(reference_path.read_text(encoding="utf-8"))
-    coordinator = ActionCoordinator(args.heal_below, args.emergency_hp, args.mana_below)
+    coordinator = ActionCoordinator(args.heal_below, args.emergency_hp)
     hwnd, title = find_window("Tibia -")
     capture_session = CaptureSession.for_window(
         hwnd,
@@ -188,7 +182,6 @@ def main() -> int:
         "combat_max_seconds": args.combat_max_seconds,
         "heal_below": args.heal_below,
         "emergency_hp": args.emergency_hp,
-        "mana_below": args.mana_below,
         "retreat_enemies": args.retreat_enemies,
         "autoloot": args.autoloot,
         "capture_source": args.capture_source,
@@ -242,17 +235,13 @@ def main() -> int:
                 }
             )
 
-            if decision in {"heal", "emergency_heal", "restore_mana"}:
-                if decision == "restore_mana":
-                    consecutive_heals = 0
-                else:
-                    consecutive_heals += 1
-                    if consecutive_heals > 5:
-                        raise RuntimeError("Cura nao elevou o HP apos 5 tentativas")
+            if decision in {"heal", "emergency_heal"}:
+                consecutive_heals += 1
+                if consecutive_heals > 5:
+                    raise RuntimeError("Cura nao elevou o HP apos 5 tentativas")
                 resource_keys = {
                     "heal": (VK_O, "O"),
                     "emergency_heal": (VK_F1, "F1"),
-                    "restore_mana": (VK_F2, "F2"),
                 }
                 virtual_key, key_name = resource_keys[decision]
                 with coordinator.action(decision, state["frame_id"]):
@@ -303,7 +292,6 @@ def main() -> int:
                             args.combat_max_seconds,
                             args.heal_below,
                             args.emergency_hp,
-                            args.mana_below,
                             args.retreat_enemies,
                             list(state["enemies"]),
                         )
@@ -342,7 +330,6 @@ def main() -> int:
                         capture_session=capture_session,
                         heal_below=args.heal_below,
                         emergency_hp=args.emergency_hp,
-                        mana_below=args.mana_below,
                     )
                 run["segments"].append(
                     {"type": "movement", "movement_type": movement_type, "plan": plan, "run": movement}

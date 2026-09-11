@@ -76,7 +76,7 @@ def main() -> int:
     parser.add_argument("--silence", type=float, default=2.0)
     parser.add_argument("--heal-below", type=float, default=90.0)
     parser.add_argument("--emergency-hp", type=int, default=300)
-    parser.add_argument("--mana-below", type=int, default=100)
+
     parser.add_argument("--retreat-enemies", type=int, default=4)
     parser.add_argument("--attack-interval", type=float, default=1.2)
     parser.add_argument("--capture-source", choices=CAPTURE_MODES, default="auto")
@@ -98,8 +98,7 @@ def main() -> int:
         parser.error("--heal-below deve estar entre 0 e 100")
     if args.emergency_hp < 0:
         parser.error("--emergency-hp nao pode ser negativo")
-    if args.mana_below < 0:
-        parser.error("--mana-below nao pode ser negativo")
+
     if args.retreat_enemies < 1:
         parser.error("--retreat-enemies deve ser pelo menos 1")
 
@@ -117,7 +116,7 @@ def main() -> int:
     last_attack = 0.0
     last_heal_o = 0.0
     last_heal_f1 = 0.0
-    last_mana_f2 = 0.0
+
     retreats = 0
     last_retreat = 0.0
     reason = "max_duration"
@@ -224,28 +223,6 @@ def main() -> int:
                 emit("healed", key="F1", hp_before=hp_percent, hp_abs=health_current)
                 time.sleep(0.1)
                 continue
-            mana_info = status.get("mana") or {}
-            mana_current = mana_info.get("current")
-            if (
-                mana_current is not None
-                and mana_current <= 100
-                and now - last_mana_f2 >= 5.0
-            ):
-                time.sleep(0.3)
-                _, verify = capture_session.capture_and_analyze(
-                    hwnd, source_folder, output_folder, analyze_frame,
-                )
-                mana_verify = (verify.get("status") or {}).get("mana") or {}
-                mana_verify_current = mana_verify.get("current")
-                if mana_verify_current is not None and mana_verify_current <= 100:
-                    focus_game(hwnd)
-                    press_key(VK_F2, hwnd)
-                    last_mana_f2 = now
-                    emit("restored_mana", key="F2", mana_before=mana_percent, mana_abs=mana_current)
-                    time.sleep(0.1)
-                    continue
-                else:
-                    emit("mana_verify_skip", read=mana_current, verified=mana_verify_current)
             if hp_percent < args.heal_below and now - last_heal_o >= 1.2:
                 focus_game(hwnd)
                 press_key(VK_O, hwnd)
@@ -326,7 +303,6 @@ def main() -> int:
                             capture_session=capture_session,
                             heal_below=args.heal_below,
                             emergency_hp=args.emergency_hp,
-                            mana_below=args.mana_below,
                         )
                         emit(
                             "autoloot_finished",

@@ -91,7 +91,6 @@ def execute_sequence(
     capture_session: CaptureSession | None = None,
     heal_below: float | None = None,
     emergency_hp: int | None = None,
-    mana_below: float | None = None,
 ) -> tuple[dict, int]:
     invalid = sorted(set(sequence) - set(CARDINAL_DIRECTIONS))
     if invalid:
@@ -118,13 +117,12 @@ def execute_sequence(
     run_path = runs_folder / f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}_{sequence}.json"
 
     def pending_resource(state: dict) -> str | None:
-        if heal_below is None and emergency_hp is None and mana_below is None:
+        if heal_below is None and emergency_hp is None:
             return None
         return resource_action(
             state,
             heal_below=-1 if heal_below is None else heal_below,
             emergency_hp=-1 if emergency_hp is None else emergency_hp,
-            mana_below=-1 if mana_below is None else mana_below,
         )
 
     def interrupt_for_resource(state: dict, position: tuple[int, int, int]) -> tuple[dict, int] | None:

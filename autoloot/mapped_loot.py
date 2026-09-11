@@ -74,7 +74,6 @@ def perform_mapped_autoloot(
     capture_session: CaptureSession | None = None,
     heal_below: float | None = None,
     emergency_hp: int | None = None,
-    mana_below: float | None = None,
 ) -> dict:
     from autoloot.detect_corpses import detect_corpses
 
@@ -122,7 +121,6 @@ def perform_mapped_autoloot(
             capture_session=capture_session,
             heal_below=heal_below,
             emergency_hp=emergency_hp,
-            mana_below=mana_below,
         )
         if exit_code == 3:
             results.append({"corpse": list(corpse), "status": "interrupted_for_resource", "plan": plan, "run": run})
