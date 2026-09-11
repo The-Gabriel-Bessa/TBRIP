@@ -120,7 +120,6 @@ def main() -> int:
     last_mana_f2 = 0.0
     retreats = 0
     last_retreat = 0.0
-    last_target_name = None
     reason = "max_duration"
     unmatched_scans = 0
     chat_state: dict | None = None
@@ -401,13 +400,7 @@ def main() -> int:
                             if until_attack > 0:
                                 time.sleep(min(0.1, until_attack))
                                 continue
-                            if target["name"] != last_target_name:
-                                point = click_target_and_fire(hwnd, saved, target)
-                                last_target_name = target["name"]
-                            else:
-                                focus_game(hwnd)
-                                press_key(VK_P, hwnd)
-                                point = "key_only"
+                            point = click_target_and_fire(hwnd, saved, target)
                             attacks += 1
                             last_attack = time.monotonic()
                             emit("attacked", target=target["name"], key="P", screen_click=point)
@@ -469,13 +462,7 @@ def main() -> int:
             if until_attack > 0:
                 time.sleep(min(0.1, until_attack))
                 continue
-            if target["name"] != last_target_name:
-                point = click_target_and_fire(hwnd, saved, target)
-                last_target_name = target["name"]
-            else:
-                focus_game(hwnd)
-                press_key(VK_P, hwnd)
-                point = "key_only"
+            point = click_target_and_fire(hwnd, saved, target)
             attacks += 1
             last_attack = time.monotonic()
             emit("attacked", target=target["name"], key="P", screen_click=point)
