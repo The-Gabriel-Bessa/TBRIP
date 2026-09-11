@@ -139,9 +139,19 @@ def read_status(image_path: Path) -> dict:
 
 
 def read_status_fast(image_path: Path) -> dict:
-    """Read only the centered character bars, without numeric HUD OCR."""
+    """Prefer the numeric HUD, with centered character bars as fallback."""
     with Image.open(image_path) as source:
         image = source.convert("RGB")
+    numeric = read_numeric_hud(image)
+    if numeric:
+        return {
+            "image": str(image_path.resolve()),
+            "health_percent": numeric["health_numeric_percent"],
+            "mana_percent": numeric["mana_numeric_percent"],
+            "health": numeric["health"],
+            "mana": numeric["mana"],
+            "mode": "numeric_hud",
+        }
     width, height = image.size
     gameplay_center_x = round((width - 352) / 2)
     gameplay_center_y = min(302, height // 2)
@@ -151,6 +161,19 @@ def read_status_fast(image_path: Path) -> dict:
     bottom = min(height, gameplay_center_y + 30)
     pixels = np.asarray(image.crop((left, top, right, bottom)), dtype=np.uint8)
     pairs = find_bar_pairs(pixels)
+    if not pairs:
+        wide_left = max(0, gameplay_center_x - 140)
+        wide_right = min(width, gameplay_center_x + 140)
+        wide_top = max(0, gameplay_center_y - 120)
+        wide_bottom = min(height, gameplay_center_y + 50)
+        wide_pixels = np.asarray(
+            image.crop((wide_left, wide_top, wide_right, wide_bottom)),
+            dtype=np.uint8,
+        )
+        pairs = find_bar_pairs(wide_pixels)
+        if pairs:
+            left, top = wide_left, wide_top
+            pixels = wide_pixels
     if not pairs:
         raise RuntimeError("Nao foi possivel ler rapidamente as barras do personagem")
     center_x = pixels.shape[1] / 2
@@ -183,19 +206,25 @@ def ocr_fraction(image: Image.Image, box: tuple[int, int, int, int]) -> dict | N
         return None
 
     crop = image.crop(box).getchannel("R")
-    binary = crop.point(lambda value: 0 if value > 180 else 255)
-    enlarged = binary.resize((binary.width * 10, binary.height * 10))
-    text = pytesseract.image_to_string(
-        enlarged,
-        config="--psm 7 -c tessedit_char_whitelist=0123456789/()",
-    )
-    match = re.search(r"(\d+)\s*/\s*(\d+)", text)
-    if not match:
-        return None
-    current, maximum = map(int, match.groups())
-    if maximum <= 0 or current > maximum:
-        return None
-    return {"current": current, "maximum": maximum, "ocr_text": text.strip()}
+    for threshold in (140, 120, 100):
+        binary = crop.point(lambda value, limit=threshold: 255 if value > limit else 0)
+        enlarged = binary.resize((binary.width * 8, binary.height * 8))
+        text = pytesseract.image_to_string(
+            enlarged,
+            config="--psm 7 -c tessedit_char_whitelist=0123456789/()",
+        )
+        match = re.search(r"(\d+)\s*/\s*(\d+)", text)
+        if not match:
+            continue
+        current, maximum = map(int, match.groups())
+        if maximum > 0 and current <= maximum:
+            return {
+                "current": current,
+                "maximum": maximum,
+                "ocr_text": text.strip(),
+                "threshold": threshold,
+            }
+    return None
 
 
 def read_numeric_hud(image: Image.Image) -> dict:
@@ -203,14 +232,14 @@ def read_numeric_hud(image: Image.Image) -> dict:
     if width < 1000:
         return {}
 
-    strip_height = max(20, round(height * 0.028))
+    strip_height = max(28, round(height * 0.04))
     health = ocr_fraction(
         image,
-        (round(width * 0.14), 0, round(width * 0.235), strip_height),
+        (round(width * 0.12), 0, round(width * 0.28), strip_height),
     )
     mana = ocr_fraction(
         image,
-        (round(width * 0.48), 0, round(width * 0.62), strip_height),
+        (round(width * 0.44), 0, round(width * 0.68), strip_height),
     )
     if health is None or mana is None:
         return {}

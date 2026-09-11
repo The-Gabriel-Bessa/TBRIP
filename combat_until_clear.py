@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import json
+import math
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -18,7 +19,7 @@ LOOTABLE_CREATURES = {"Amazon", "Witch", "Valkyrie"}
 from autoloot.mapped_loot import perform_mapped_autoloot
 from autoloot.read_world_targets import read_world_targets
 from combat_feedback import read_combat_feedback
-from capture_internal import find_window, press_key
+from capture_internal import find_window, focus_window, press_key
 from movement.pathfinding import attack_range_approach
 from movement.safe_walk import execute_sequence
 from movement.world_model import analyze_world, localize_in_reference
@@ -43,7 +44,7 @@ def emit(event: str, **values) -> None:
 
 
 def focus_game(hwnd: int) -> None:
-    user32.SwitchToThisWindow(hwnd, True)
+    focus_window(hwnd)
     time.sleep(0.2)
 
 
@@ -52,12 +53,18 @@ def click_target_and_fire(hwnd: int, image: Path, target: dict) -> list[int]:
     previous_cursor = POINT()
     user32.GetCursorPos(ctypes.byref(previous_cursor))
     focus_game(hwnd)
-    user32.SetCursorPos(screen_point.x, screen_point.y)
-    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-    time.sleep(0.12)
-    press_key(VK_P)
-    user32.SetCursorPos(previous_cursor.x, previous_cursor.y)
+    try:
+        user32.SetCursorPos(screen_point.x, screen_point.y)
+        user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        try:
+            time.sleep(0.05)
+        finally:
+            user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        time.sleep(0.12)
+        press_key(VK_P, hwnd)
+    finally:
+        user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+        user32.SetCursorPos(previous_cursor.x, previous_cursor.y)
     return [screen_point.x, screen_point.y]
 
 
@@ -70,6 +77,7 @@ def main() -> int:
     parser.add_argument("--capture-source", choices=CAPTURE_MODES, default="auto")
     parser.add_argument("--obs-device", default=VCAM_DEVICE)
     parser.add_argument("--ffmpeg")
+    parser.add_argument("--initial-enemy", action="append", default=[])
     parser.add_argument(
         "--autoloot",
         action=argparse.BooleanOptionalAction,
@@ -77,6 +85,12 @@ def main() -> int:
         help="Aproxima pelos tiles verdes e executa Alt+Q; use --no-autoloot para desativar",
     )
     args = parser.parse_args()
+    if not math.isfinite(args.max_seconds) or args.max_seconds <= 0:
+        parser.error("--max-seconds deve ser um numero positivo")
+    if not math.isfinite(args.attack_interval) or args.attack_interval <= 0:
+        parser.error("--attack-interval deve ser um numero positivo")
+    if not math.isfinite(args.heal_below) or not 0 <= args.heal_below <= 100:
+        parser.error("--heal-below deve estar entre 0 e 100")
 
     project = Path(__file__).resolve().parent
     source_folder = Path.home() / "AppData" / "Local" / "Tibia" / "packages" / "Tibia" / "screenshots"
@@ -97,9 +111,7 @@ def main() -> int:
     encounter_id = f"combat-{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}"
     autoloot_result: dict | None = None
     corpse_detection: dict | None = None
-    previous_counts: Counter = Counter()
-    maximum_counts: Counter = Counter()
-    detected_deaths: Counter = Counter()
+    maximum_counts: Counter = Counter(args.initial_enemy)
     unresolved_out_of_range = 0
 
     capture_session = CaptureSession.for_window(
@@ -108,17 +120,25 @@ def main() -> int:
         ffmpeg_path=args.ffmpeg,
         device=args.obs_device,
     )
-    capture_session.start()
-    readers = ThreadPoolExecutor(max_workers=5, thread_name_prefix="combat-reader")
-    capture_mode = capture_session.active_mode
-    emit("combat_loop_started", window=title, capture=capture_session.stats())
+    readers: ThreadPoolExecutor | None = None
+    capture_mode = "stopped"
+    capture_stats: dict = {}
 
     def analyze_frame(image: Path) -> dict:
+        assert readers is not None
         battle_future = readers.submit(read_battle_list, image)
         status_future = readers.submit(read_status_fast, image)
         feedback_future = readers.submit(read_combat_feedback, image)
         battle = battle_future.result()
-        status = status_future.result()
+        try:
+            status = status_future.result()
+        except Exception as exc:
+            emit("status_read_failed", error=str(exc))
+            status = {
+                "health_percent": 100,
+                "mana_percent": 100,
+                "mode": "fallback_safe",
+            }
         feedback = feedback_future.result()
         result = {"battle": battle, "status": status, "feedback": feedback}
         if feedback["destination_out_of_range"]:
@@ -132,6 +152,10 @@ def main() -> int:
         return result
 
     try:
+        capture_session.start()
+        readers = ThreadPoolExecutor(max_workers=5, thread_name_prefix="combat-reader")
+        capture_mode = capture_session.active_mode
+        emit("combat_loop_started", window=title, capture=capture_session.stats())
         while time.monotonic() - started < args.max_seconds:
             saved, scan = capture_session.capture_and_analyze(
                 hwnd,
@@ -161,11 +185,8 @@ def main() -> int:
             hp_percent = status["health_percent"]
             enemies = battle["matched_enemies"]
             current_counts = Counter(enemy["name"] for enemy in enemies)
-            for creature, count in previous_counts.items():
-                detected_deaths[creature] += max(0, count - current_counts[creature])
             for creature, count in current_counts.items():
                 maximum_counts[creature] = max(maximum_counts[creature], count)
-            previous_counts = current_counts
             emit(
                 "scan",
                 hp=hp_percent,
@@ -177,21 +198,20 @@ def main() -> int:
             if hp_percent < args.heal_below:
                 if time.monotonic() - last_heal >= 1.2:
                     focus_game(hwnd)
-                    press_key(VK_O)
+                    press_key(VK_O, hwnd)
                     heals += 1
                     last_heal = time.monotonic()
                     emit("healed", key="O", hp_before=hp_percent)
-                if not battle["empty"]:
-                    time.sleep(0.1)
-                    continue
+                time.sleep(0.1)
+                continue
 
             if battle["empty"]:
                 reason = "battle_list_empty"
                 expected_corpses = {
-                    creature: max(maximum_counts[creature], detected_deaths[creature])
+                    creature: maximum_counts[creature]
                     for creature in maximum_counts
                     if creature in LOOTABLE_CREATURES
-                    and max(maximum_counts[creature], detected_deaths[creature]) > 0
+                    and maximum_counts[creature] > 0
                 }
                 if expected_corpses:
                     try:
@@ -220,6 +240,7 @@ def main() -> int:
                             corpse_detection=corpse_detection,
                             reference_path=reference_path,
                             capture_session=capture_session,
+                            heal_below=args.heal_below,
                         )
                         emit(
                             "autoloot_finished",
@@ -274,6 +295,18 @@ def main() -> int:
                             attack_range=1,
                         )
                         chase_keys = chase["keys"][:2]
+                        if not chase_keys:
+                            unresolved_out_of_range = 0
+                            emit("target_already_in_range", target=target["name"])
+                            until_attack = args.attack_interval - (time.monotonic() - last_attack)
+                            if until_attack > 0:
+                                time.sleep(min(0.1, until_attack))
+                                continue
+                            point = click_target_and_fire(hwnd, saved, target)
+                            attacks += 1
+                            last_attack = time.monotonic()
+                            emit("attacked", target=target["name"], key="P", screen_click=point)
+                            continue
                         chase_state = {
                             "frame_id": saved.stem,
                             "image": str(saved.resolve()),
@@ -295,6 +328,7 @@ def main() -> int:
                             initial_state=chase_state,
                             stop_on_enemies=False,
                             capture_session=capture_session,
+                            heal_below=args.heal_below,
                         )
                         emit(
                             "target_chase",
@@ -335,9 +369,18 @@ def main() -> int:
             last_attack = time.monotonic()
             emit("attacked", target=target["name"], key="P", screen_click=point)
     finally:
-        readers.shutdown(wait=True, cancel_futures=True)
+        if readers is not None:
+            readers.shutdown(wait=True, cancel_futures=True)
         capture_stats = capture_session.stats()
         capture_session.stop()
+
+    if autoloot_result is not None and autoloot_result.get("status") in {
+        "error",
+        "partial",
+        "aborted_unlocalized",
+        "no_corpses_detected",
+    }:
+        reason = "autoloot_failed"
 
     emit(
         "combat_loop_stopped",
@@ -349,7 +392,7 @@ def main() -> int:
         corpse_detection=corpse_detection,
         capture=capture_stats,
     )
-    return 0
+    return 0 if reason == "battle_list_empty" else 2
 
 
 if __name__ == "__main__":
