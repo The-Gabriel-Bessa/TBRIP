@@ -443,7 +443,6 @@ def main() -> int:
 
     if autoloot_result is not None and autoloot_result.get("status") in {
         "error",
-        "partial",
         "aborted_unlocalized",
     }:
         reason = "autoloot_failed"
